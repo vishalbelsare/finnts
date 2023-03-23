@@ -53,6 +53,7 @@
 #' }
 #' @export
 ensemble_models <- function(run_info,
+                            feature_selection = TRUE, 
                             parallel_processing = NULL,
                             inner_parallel = FALSE,
                             num_cores = NULL,
@@ -81,6 +82,7 @@ ensemble_models <- function(run_info,
   run_local_models <- log_df$run_local_models
   models_to_run <- log_df$models_to_run
   models_not_to_run <- log_df$models_not_to_run
+  date_type <- log_df$date_type
 
   if (log_df$run_ensemble_models == FALSE) {
     cli::cli_alert_info("Ensemble models have been turned off.")
@@ -220,6 +222,19 @@ ensemble_models <- function(run_info,
           names_from = Model_Key, values_from = Forecast,
           id_cols = c("Combo", "Date", "Train_Test_ID", "Target"), values_fill = 0
         )
+      
+      if(feature_selection) {
+        
+        fs_list <- prep_ensemble_tbl %>%
+          select_features(
+            run_info, 
+            model_train_test_tbl, 
+            ifelse(inner_parallel, "local_machine", NULL), 
+            date_type)
+        
+        prep_ensemble_tbl <- prep_ensemble_tbl %>%
+          dplyr::select(tidyselect::all_of(unique(c("Combo", "Date", "Train_Test_ID", "Target", fs_list))))
+      }
 
       # ensemble models to run
       if (length(ensemble_model_list) < 1) {
