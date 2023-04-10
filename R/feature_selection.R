@@ -220,6 +220,7 @@ vip_lm_fn <- function(data,
   lm_recipe <- 
     recipes::recipe(Target ~ ., data = data %>% dplyr::select(-Date, -Combo)) %>%
     recipes::step_normalize(all_numeric_predictors()) %>%
+    recipes::step_zv(all_predictors()) %>%
     recipes::step_dummy(all_nominal())
   
   lm_workflow <- 
