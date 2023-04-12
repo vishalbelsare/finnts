@@ -147,6 +147,8 @@ prep_data <- function(run_info,
       dplyr::filter(Date == min(Date)) %>%
       dplyr::pull(Date) %>%
       suppressWarnings()
+    
+    hist_start_date <- min(unique(hist_start_date))
   }
 
   # prep initial data before feature engineering
@@ -307,7 +309,8 @@ prep_data <- function(run_info,
         }
 
         initial_tbl <- initial_prep_combo_tbl %>%
-          dplyr::filter(Combo == combo) %>%
+          dplyr::filter(Combo == combo, 
+                        Date <= hist_end_date) %>%
           dplyr::select(
             Combo,
             Date,
