@@ -200,7 +200,7 @@ vip_rf_fn <- function(data,
   set.seed(seed)
   
   ranger_vip_fs <- rf_workflow %>% 
-    fit(data) %>% 
+    generics::fit(data) %>% 
     workflows::extract_fit_parsnip() %>% 
     vip::vi() %>%
     dplyr::filter(Importance > 0) %>%
@@ -219,9 +219,9 @@ vip_lm_fn <- function(data,
   
   lm_recipe <- 
     recipes::recipe(Target ~ ., data = data %>% dplyr::select(-Date, -Combo)) %>%
-    recipes::step_normalize(all_numeric_predictors()) %>%
-    recipes::step_zv(all_predictors()) %>%
-    recipes::step_dummy(all_nominal())
+    recipes::step_normalize(recipes::all_numeric_predictors()) %>%
+    recipes::step_zv(recipes::all_predictors()) %>%
+    recipes::step_dummy(recipes::all_nominal())
   
   lm_workflow <- 
     workflows::workflow() %>% 
@@ -231,7 +231,7 @@ vip_lm_fn <- function(data,
   set.seed(seed)
   
   lm_vip_fs <- lm_workflow %>% 
-    fit(data) %>% 
+    generics::fit(data) %>% 
     workflows::extract_fit_parsnip() %>% 
     vip::vi() %>%
     dplyr::filter(Importance > 0) %>%
@@ -374,7 +374,7 @@ lofo_fn <- function(run_info,
       set.seed(123)
       
       xgb_model_fit <- wflw_spec_tune_xgboost %>%
-        fit(train_data)
+        generics::fit(train_data)
       
       xgb_fcst <- test_data %>%
         dplyr::bind_cols(
@@ -388,7 +388,7 @@ lofo_fn <- function(run_info,
       set.seed(123)
       
       lr_model_fit <- wflw_spec_glmnet %>%
-        fit(train_data)
+        generics::fit(train_data)
       
       lr_fcst <- test_data %>%
         dplyr::bind_cols(
@@ -402,7 +402,7 @@ lofo_fn <- function(run_info,
       set.seed(123)
       
       cubist_model_fit <- wflw_spec_cubist %>%
-        fit(train_data)
+        generics::fit(train_data)
       
       cubist_fcst <- test_data %>%
         dplyr::bind_cols(
@@ -568,7 +568,7 @@ xreg_fn <- function(run_info,
       set.seed(123)
       
       xgb_model_fit <- wflw_spec_tune_xgboost %>%
-        fit(train_data)
+        generics::fit(train_data)
       
       xgb_fcst <- test_data %>%
         dplyr::bind_cols(
@@ -582,7 +582,7 @@ xreg_fn <- function(run_info,
       set.seed(123)
       
       lr_model_fit <- wflw_spec_glmnet %>%
-        fit(train_data)
+        generics::fit(train_data)
       
       lr_fcst <- test_data %>%
         dplyr::bind_cols(
@@ -596,7 +596,7 @@ xreg_fn <- function(run_info,
       set.seed(123)
       
       cubist_model_fit <- wflw_spec_cubist %>%
-        fit(train_data)
+        generics::fit(train_data)
       
       cubist_fcst <- test_data %>%
         dplyr::bind_cols(
