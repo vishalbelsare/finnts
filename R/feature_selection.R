@@ -169,6 +169,7 @@ multicolinearity_fn <- function(data) {
     Target ~ .,
     data = data
   ) %>%
+    recipes::step_zv(recipes::all_predictors()) %>%
     recipes::step_corr(recipes::all_numeric_predictors(), threshold = .75) %>%
     recipes::prep(training = data) %>%
     recipes::bake(data) %>%
@@ -219,8 +220,8 @@ vip_lm_fn <- function(data,
   
   lm_recipe <- 
     recipes::recipe(Target ~ ., data = data %>% dplyr::select(-Date, -Combo)) %>%
-    recipes::step_normalize(recipes::all_numeric_predictors()) %>%
     recipes::step_zv(recipes::all_predictors()) %>%
+    recipes::step_normalize(recipes::all_numeric_predictors()) %>%
     recipes::step_dummy(recipes::all_nominal())
   
   lm_workflow <- 
