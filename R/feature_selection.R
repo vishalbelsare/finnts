@@ -3,7 +3,8 @@ select_features <- function(input_data,
                             run_info,
                             train_test_data, 
                             parallel_processing, 
-                            date_type) {
+                            date_type, 
+                            fast = FALSE) {
   
   input_data <- input_data %>%
     tidyr::drop_na(Target)
@@ -26,40 +27,55 @@ select_features <- function(input_data,
     
     votes_needed <- 3
     
-    lofo_results <- lofo_fn(
-      run_info,
-      input_data,
-      train_test_data,
-      parallel_processing) %>%
-      dplyr::filter(Imp >= 0) %>%
-      dplyr::rename(Feature = LOFO_Var) %>%
-      dplyr::mutate(Vote = 1,
-                    Auto_Accept = 0) %>%
-      dplyr::select(Feature, Vote, Auto_Accept)
+    if(!fast) { # run leave one feature out selection
+      lofo_results <- lofo_fn(
+        run_info,
+        input_data,
+        train_test_data,
+        parallel_processing) %>%
+        dplyr::filter(Imp >= 0) %>%
+        dplyr::rename(Feature = LOFO_Var) %>%
+        dplyr::mutate(Vote = 1,
+                      Auto_Accept = 0) %>%
+        dplyr::select(Feature, Vote, Auto_Accept)
+    } else{
+      lofo_results <- tibble::tibble()
+    }
     
+    # correlation to target
     target_corr_results <- target_corr_fn(input_data, 0.5) %>%
       dplyr::rename(Feature = term) %>%
       dplyr::mutate(Vote = 1, 
                     Auto_Accept = 0) %>%
       dplyr::select(Feature, Vote, Auto_Accept)
 
+    # botuta feature selection
     boruta_results <- tibble::tibble(
       Feature = boruta_fn(input_data), 
       Vote = 1, 
       Auto_Accept = 0)
   }
   
-  multicolinearity_results <- tibble::tibble(
-    Feature = multicolinearity_fn(input_data), 
-    Vote = 1, 
-    Auto_Accept = 0)
-
+  # multicolinearity_results <- tibble::tibble(
+  #   Feature = multicolinearity_fn(input_data), 
+  #   Vote = 1, 
+  #   Auto_Accept = 0)
+  
+  # random forest feature importance
   vip_rf_results <- vip_rf_fn(input_data) %>%
     dplyr::rename(Feature = Variable) %>%
     dplyr::mutate(Vote = 1, 
                   Auto_Accept = 0) %>%
     dplyr::select(Feature, Vote, Auto_Accept)
+  
+  # cubist feature importance
+  vip_cubist_results <- vip_cubist_fn(input_data) %>%
+    dplyr::rename(Feature = Variable) %>%
+    dplyr::mutate(Vote = 1, 
+                  Auto_Accept = 0) %>%
+    dplyr::select(Feature, Vote, Auto_Accept)
 
+  # lasso regression feature importance
   vip_lm_initial <- vip_lm_fn(input_data) 
   
   missing_cols <- setdiff(colnames(input_data %>% 
@@ -82,10 +98,12 @@ select_features <- function(input_data,
     Auto_Accept = 1
   )
 
+  # consolidate results and create votes
   final_feature_votes <- rbind(
-    multicolinearity_results, 
+    #multicolinearity_results, 
     target_corr_results, 
     vip_rf_results, 
+    vip_cubist_results,
     vip_lm_results, 
     boruta_results, 
     lofo_results) %>%
@@ -95,14 +113,17 @@ select_features <- function(input_data,
     dplyr::arrange(desc(Votes))
   
   fs_list <- final_feature_votes %>%
-    dplyr::filter(Votes >= votes_needed | Auto_Accept > 0) %>%
+    #dplyr::filter(Votes >= votes_needed | Auto_Accept > 0) %>%
+    dplyr::filter(Votes >= votes_needed) %>%
     dplyr::pull(Feature) %>%
     sort()
   
   data_final <- input_data %>%
     dplyr::select(unique(c("Combo", "Date", "Target", fs_list)))
   
-  return(fs_list)
+  fs_list_final <- multicolinearity_fn(data_final)
+  
+  return(fs_list_final)
 }
 
 
@@ -170,10 +191,10 @@ multicolinearity_fn <- function(data) {
     data = data
   ) %>%
     recipes::step_zv(recipes::all_predictors()) %>%
-    recipes::step_corr(recipes::all_numeric_predictors(), threshold = .75) %>%
+    recipes::step_corr(recipes::all_numeric_predictors(), threshold = .9) %>%
     recipes::prep(training = data) %>%
     recipes::bake(data) %>%
-    dplyr::select_if(is.numeric) %>%
+    #dplyr::select_if(is.numeric) %>%
     colnames()
 }
 
@@ -185,7 +206,7 @@ target_corr_fn <- function(data,
 }
 
 vip_rf_fn <- function(data, 
-                      seed = 1234) {
+                      seed = 123) {
   
   rf_mod <- parsnip::rand_forest(mode = "regression", trees = 100) %>% 
     parsnip::set_engine("ranger", importance = "impurity")
@@ -204,8 +225,8 @@ vip_rf_fn <- function(data,
     generics::fit(data) %>% 
     workflows::extract_fit_parsnip() %>% 
     vip::vi() %>%
-    dplyr::filter(Importance > 0) %>%
-    dplyr::slice(1:round((length(colnames(data))*0.3)))
+    dplyr::filter(Importance > 0) #%>%
+    #dplyr::slice(1:round((length(colnames(data))*0.3)))
   
   return(ranger_vip_fs)
 }
@@ -235,10 +256,39 @@ vip_lm_fn <- function(data,
     generics::fit(data) %>% 
     workflows::extract_fit_parsnip() %>% 
     vip::vi() %>%
-    dplyr::filter(Importance > 0) %>%
-    dplyr::slice(1:round((length(colnames(data))*0.3)))
+    dplyr::filter(Importance > 0) #%>%
+    #dplyr::slice(1:round((length(colnames(data))*0.3)))
   
   return(lm_vip_fs)
+}
+
+vip_cubist_fn <- function(data,
+                          seed = 123) {
+  
+  model_spec_cubist <- parsnip::cubist_rules(
+    mode = "regression",
+    committees = 25
+  ) %>%
+    parsnip::set_engine("Cubist")
+  
+  cubist_recipe <- 
+    recipes::recipe(Target ~ ., data = data %>% dplyr::select(-Date)) %>%
+    recipes::step_zv(recipes::all_predictors())
+  
+  cubist_workflow <- 
+    workflows::workflow() %>% 
+    workflows::add_model(model_spec_cubist) %>% 
+    workflows::add_recipe(cubist_recipe)
+  
+  set.seed(seed)
+  
+  cubist_vip_fs <- cubist_workflow %>% 
+    generics::fit(data) %>% 
+    workflows::extract_fit_parsnip() %>% 
+    vip::vi() %>%
+    dplyr::filter(Importance > 0) 
+  
+  return(cubist_vip_fs)
 }
 
 boruta_fn <- function(data, 
