@@ -422,9 +422,10 @@ prep_data <- function(run_info,
     # clean up any parallel run process
     par_end(cl)
   } else if (parallel_processing == "spark") {
-    print(filtered_initial_prep_tbl) # prevents spark tbl errors
+    # print(filtered_initial_prep_tbl) # prevents spark tbl errors
     final_data <- filtered_initial_prep_tbl %>%
       adjust_df(return_type = "sdf") %>%
+      print() %>% # prevents spark tbl errors
       sparklyr::spark_apply(function(df, context) {
         for (name in names(context)) {
           assign(name, context[[name]], envir = .GlobalEnv)
