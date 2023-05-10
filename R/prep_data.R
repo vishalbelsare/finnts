@@ -688,7 +688,7 @@ get_xregs_future_values_tbl <- function(data_tbl,
                                         forecast_approach) {
   if (forecast_approach != "bottoms_up") {
     data_tbl %>%
-      tibble::tibble() %>%
+      tibble::as_tibble() %>%
       dplyr::select(Combo, Date)
   } else {
     xregs_future_values_list <- c()
@@ -750,7 +750,7 @@ clean_outliers_missing_values <- function(df,
         correct_clean_func
       )
     ) %>%
-    tibble::tibble()
+    tibble::as_tibble()
 }
 
 #' Function to get frequency number of time series
