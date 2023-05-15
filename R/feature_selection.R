@@ -11,7 +11,7 @@ select_features <- function(input_data,
   
   if(date_type %in% c("day", "week")) {
     
-    votes_needed <- 2
+    votes_needed <- 3
     
     lofo_results <- tibble::tibble()
     
