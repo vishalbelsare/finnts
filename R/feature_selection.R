@@ -25,9 +25,10 @@ select_features <- function(input_data,
     
   } else {
     
-    votes_needed <- 3
     
     if(!fast) { # run leave one feature out selection
+      votes_needed <- 4
+      
       lofo_results <- lofo_fn(
         run_info,
         input_data,
@@ -39,6 +40,8 @@ select_features <- function(input_data,
                       Auto_Accept = 0) %>%
         dplyr::select(Feature, Vote, Auto_Accept)
     } else{
+      votes_needed <- 3
+      
       lofo_results <- tibble::tibble()
     }
     
