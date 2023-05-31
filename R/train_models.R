@@ -281,6 +281,7 @@ train_models <- function(run_info,
       vip_lm_fn <- vip_lm_fn
       vip_cubist_fn <- vip_cubist_fn
       boruta_fn <- boruta_fn
+      feature_selection <- feature_selection
 
       # tune models
       tune_iter_list <- model_train_test_tbl %>%
