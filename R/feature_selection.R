@@ -2,12 +2,17 @@
 select_features <- function(input_data,
                             run_info,
                             train_test_data, 
-                            parallel_processing, 
+                            parallel_processing = NULL, 
                             date_type, 
                             fast = FALSE) {
+
+  cols <- multicolinearity_fn(input_data)
   
   input_data <- input_data %>%
-    tidyr::drop_na(Target)
+    tidyr::drop_na(Target) %>%
+    dplyr::select(Combo, Target, tidyselect::all_of(cols))
+  
+  print(input_data)
   
   if(date_type %in% c("day", "week")) {
     
@@ -25,7 +30,6 @@ select_features <- function(input_data,
     
   } else {
     
-    
     if(!fast) { # run leave one feature out selection
       votes_needed <- 4
       
@@ -34,11 +38,12 @@ select_features <- function(input_data,
         input_data,
         train_test_data,
         parallel_processing) %>%
-        dplyr::filter(Imp >= 0) %>%
+        dplyr::filter(Imp > 0) %>%
         dplyr::rename(Feature = LOFO_Var) %>%
         dplyr::mutate(Vote = 1,
                       Auto_Accept = 0) %>%
         dplyr::select(Feature, Vote, Auto_Accept)
+      print("lofo done")
     } else{
       votes_needed <- 3
       
@@ -46,7 +51,7 @@ select_features <- function(input_data,
     }
     
     # correlation to target
-    target_corr_results <- target_corr_fn(input_data, 0.5) %>%
+    target_corr_results <- target_corr_fn(input_data, 0.7) %>%
       dplyr::rename(Feature = term) %>%
       dplyr::mutate(Vote = 1, 
                     Auto_Accept = 0) %>%
@@ -124,7 +129,8 @@ select_features <- function(input_data,
   data_final <- input_data %>%
     dplyr::select(unique(c("Combo", "Date", "Target", fs_list)))
   
-  fs_list_final <- multicolinearity_fn(data_final)
+  # fs_list_final <- multicolinearity_fn(data_final)
+  fs_list_final <- colnames(data_final)
   
   return(fs_list_final)
 }
@@ -307,7 +313,7 @@ lofo_fn <- function(run_info,
                     pca = FALSE) {
   
   # parallel run info
-  par_info <- finnts:::par_start(
+  par_info <- par_start(
     run_info = run_info,
     parallel_processing = parallel_processing,
     num_cores = NULL,
@@ -317,11 +323,11 @@ lofo_fn <- function(run_info,
       c("Baseline_Model") %>%
       length()
   )
-  
+
   cl <- par_info$cl
   packages <- par_info$packages
   `%op%` <- par_info$foreach_operator
-  
+
   # submit tasks
   final_results <- foreach::foreach(
     x = data %>%
@@ -333,7 +339,7 @@ lofo_fn <- function(run_info,
   ) %op% {
     
     col <- x
-    
+
     if(col == "Baseline_Model") {
       data_lofo <- data
     } else {
@@ -348,21 +354,21 @@ lofo_fn <- function(run_info,
       parsnip::set_engine("xgboost")
     
     recipe_spec_xgboost <- data_lofo %>%
-      finnts:::get_recipie_configurable(
+      get_recipie_configurable(
         rm_date = "with_adj",
         step_nzv = "zv",
         one_hot = TRUE,
         pca = pca
       )
     
-    wflw_spec_tune_xgboost <- finnts:::get_workflow_simple(
+    wflw_spec_tune_xgboost <- get_workflow_simple(
       model_spec_xgboost,
       recipe_spec_xgboost
     )
     
     # glmnet model
     recipe_spec_glmnet <- data_lofo %>%
-      finnts:::get_recipie_configurable(
+      get_recipie_configurable(
         rm_date = "with_adj",
         step_nzv = "zv",
         one_hot = FALSE,
@@ -376,14 +382,14 @@ lofo_fn <- function(run_info,
     ) %>%
       parsnip::set_engine("glmnet")
     
-    wflw_spec_glmnet <- finnts:::get_workflow_simple(
+    wflw_spec_glmnet <- get_workflow_simple(
       model_spec_glmnet,
       recipe_spec_glmnet
     )
     
     # cubist model
     recipe_spec_cubist <- data_lofo %>%
-      finnts:::get_recipie_configurable(
+      get_recipie_configurable(
         rm_date = "with_adj",
         step_nzv = "nzv",
         one_hot = FALSE,
@@ -395,7 +401,7 @@ lofo_fn <- function(run_info,
     ) %>%
       parsnip::set_engine("Cubist")
     
-    wflw_spec_cubist <- finnts:::get_workflow_simple(
+    wflw_spec_cubist <- get_workflow_simple(
       model_spec_cubist,
       recipe_spec_cubist
     )
@@ -479,7 +485,7 @@ lofo_fn <- function(run_info,
     
   }
   
-  finnts:::par_end(cl)
+  par_end(cl)
   
   baseline_rmse <- final_results %>%
     dplyr::filter(LOFO_Var == 'Baseline_Model') %>%
@@ -503,7 +509,7 @@ xreg_fn <- function(run_info,
                     parallel_processing) {
   
   # parallel run info
-  par_info <- finnts:::par_start(
+  par_info <- par_start(
     run_info = run_info,
     parallel_processing = parallel_processing,
     num_cores = NULL,
@@ -542,21 +548,21 @@ xreg_fn <- function(run_info,
       parsnip::set_engine("xgboost")
     
     recipe_spec_xgboost <- data_fs %>%
-      finnts:::get_recipie_configurable(
+      get_recipie_configurable(
         rm_date = "with_adj",
         step_nzv = "zv",
         one_hot = TRUE,
         pca = FALSE
       )
     
-    wflw_spec_tune_xgboost <- finnts:::get_workflow_simple(
+    wflw_spec_tune_xgboost <- get_workflow_simple(
       model_spec_xgboost,
       recipe_spec_xgboost
     )
     
     # glmnet model
     recipe_spec_glmnet <- data_fs %>%
-      finnts:::get_recipie_configurable(
+      get_recipie_configurable(
         rm_date = "with_adj",
         step_nzv = "zv",
         one_hot = FALSE,
@@ -570,14 +576,14 @@ xreg_fn <- function(run_info,
     ) %>%
       parsnip::set_engine("glmnet")
     
-    wflw_spec_glmnet <- finnts:::get_workflow_simple(
+    wflw_spec_glmnet <- get_workflow_simple(
       model_spec_glmnet,
       recipe_spec_glmnet
     )
     
     # cubist model
     recipe_spec_cubist <- data_fs %>%
-      finnts:::get_recipie_configurable(
+      get_recipie_configurable(
         rm_date = "with_adj",
         step_nzv = "nzv",
         one_hot = FALSE,
@@ -589,7 +595,7 @@ xreg_fn <- function(run_info,
     ) %>%
       parsnip::set_engine("Cubist")
     
-    wflw_spec_cubist <- finnts:::get_workflow_simple(
+    wflw_spec_cubist <- get_workflow_simple(
       model_spec_cubist,
       recipe_spec_cubist
     )
@@ -673,7 +679,7 @@ xreg_fn <- function(run_info,
     
   }
   
-  finnts:::par_end(cl)
+  par_end(cl)
   
   baseline_rmse <- final_results %>%
     dplyr::filter(FS_Var == 'Baseline_Model') %>%

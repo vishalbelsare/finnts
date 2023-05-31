@@ -229,7 +229,7 @@ ensemble_models <- function(run_info,
           select_features(
             run_info, 
             model_train_test_tbl, 
-            ifelse(inner_parallel, "local_machine", NULL), 
+            parallel_processing = if(inner_parallel) {"local_machine"} else {NULL},
             date_type)
         
         prep_ensemble_tbl <- prep_ensemble_tbl %>%

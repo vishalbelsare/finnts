@@ -303,7 +303,7 @@ train_models <- function(run_info,
         }) %>%
         dplyr::bind_rows() %>%
         dplyr::select(Combo, Model, Recipe_ID, Train_Test_ID, Hyperparameter_ID)
-      
+
       # run feature selection
       if(feature_selection & sum(model_workflow_list %in% fs_model_list) > 0) {
         
@@ -316,10 +316,12 @@ train_models <- function(run_info,
             dplyr::select(Data) %>%
             tidyr::unnest(Data) %>%
             select_features(
-              run_info, 
-              model_train_test_tbl, 
-              ifelse(inner_parallel, "local_machine", NULL), 
-              date_type
+              run_info = run_info, 
+              train_test_data = model_train_test_tbl, 
+              # parallel_processing = if(inner_parallel) {"local_machine"} else {NULL}, 
+              parallel_processing = "local_machine", 
+              date_type = date_type, 
+              fast = FALSE
             )
 
           fs_list <- append(fs_list, list(R1 = R1_fs_list))
@@ -332,10 +334,11 @@ train_models <- function(run_info,
             dplyr::select(Data) %>%
             tidyr::unnest(Data) %>%
             select_features(
-              run_info, 
-              model_train_test_tbl, 
-              ifelse(inner_parallel, "local_machine", NULL), 
-              date_type
+              run_info = run_info, 
+              train_test_data = model_train_test_tbl, 
+              parallel_processing = if(inner_parallel) {"local_machine"} else {NULL},
+              date_type = date_type, 
+              fast = FALSE
             )
           
           fs_list <- append(fs_list, list(R2 = R2_fs_list))
@@ -362,7 +365,7 @@ train_models <- function(run_info,
           dplyr::group_split(dplyr::row_number(), .keep = FALSE),
         .combine = "rbind",
         .packages = inner_packages,
-        .errorhandling = "remove",
+        .errorhandling = "stop",
         .verbose = FALSE,
         .inorder = FALSE,
         .multicombine = TRUE,
@@ -442,10 +445,14 @@ train_models <- function(run_info,
               final_features_list <- fs_list$R2
             }
             
+            final_features_list <- final_features_list[final_features_list != "Combo"]
+            final_features_list <- final_features_list[final_features_list != "Target"]
+            
+            print(final_features_list)
             updated_recipe <- workflow$Model_Workflow[[1]] %>%
               workflows::extract_recipe(estimated = FALSE) %>%
               recipes::remove_role(tidyselect::everything(), old_role = "predictor") %>%
-              recipes::update_role(tidyselect::all_of(c(final_features_list, "Date")), new_role = "predictor")
+              recipes::update_role(tidyselect::any_of(unique(c(final_features_list, "Date"))), new_role = "predictor")
 
             workflow_final <- workflow$Model_Workflow[[1]] %>%
               workflows::update_recipe(updated_recipe)
@@ -500,7 +507,7 @@ train_models <- function(run_info,
         base::suppressPackageStartupMessages()
 
       par_end(inner_cl)
-
+      print("test1")
       best_param <- initial_tune_tbl %>%
         tidyr::unnest(Prediction) %>%
         dplyr::mutate(SE = (Target - Forecast)^2) %>%
@@ -643,10 +650,13 @@ train_models <- function(run_info,
               final_features_list <- fs_list$R2
             }
             
+            final_features_list <- final_features_list[final_features_list != "Combo"]
+            final_features_list <- final_features_list[final_features_list != "Target"]
+            
             updated_recipe <- workflow$Model_Workflow[[1]] %>%
               workflows::extract_recipe(estimated = FALSE) %>%
               recipes::remove_role(tidyselect::everything(), old_role = "predictor") %>%
-              recipes::update_role(tidyselect::all_of(c(final_features_list, "Date")), new_role = "predictor")
+              recipes::update_role(tidyselect::any_of(unique(c(final_features_list, "Date"))), new_role = "predictor")
             
             workflow_final <- workflow$Model_Workflow[[1]] %>%
               workflows::update_recipe(updated_recipe)
