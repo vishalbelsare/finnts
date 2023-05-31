@@ -58,6 +58,7 @@ train_models <- function(run_info,
                          run_global_models = FALSE,
                          run_local_models = TRUE,
                          global_model_recipes = c("R1"),
+                         feature_selection = TRUE, 
                          negative_forecast = FALSE,
                          parallel_processing = NULL,
                          inner_parallel = FALSE,
@@ -300,7 +301,49 @@ train_models <- function(run_info,
         }) %>%
         dplyr::bind_rows() %>%
         dplyr::select(Combo, Model, Recipe_ID, Train_Test_ID, Hyperparameter_ID)
-
+      
+      # run feature selection
+      if(feature_selection & sum(model_workflow_list %in% fs_model_list) > 0) {
+        
+        fs_list <- list()
+        
+        if("R1" %in% unique(tune_iter_list$Recipe_ID)) {
+          
+          R1_fs_list <- model_recipe_tbl %>%
+            dplyr::filter(Recipe == "R1") %>%
+            dplyr::select(Data) %>%
+            tidyr::unnest(Data) %>%
+            select_features(
+              run_info = run_info, 
+              train_test_data = model_train_test_tbl, 
+              # parallel_processing = if(inner_parallel) {"local_machine"} else {NULL}, 
+              parallel_processing = "local_machine", 
+              date_type = date_type, 
+              fast = FALSE
+            )
+          
+          fs_list <- append(fs_list, list(R1 = R1_fs_list))
+        }
+        
+        if("R2" %in% unique(tune_iter_list$Recipe_ID)) {
+          
+          R2_fs_list <- model_recipe_tbl %>%
+            dplyr::filter(Recipe == "R2") %>%
+            dplyr::select(Data) %>%
+            tidyr::unnest(Data) %>%
+            select_features(
+              run_info = run_info, 
+              train_test_data = model_train_test_tbl, 
+              parallel_processing = if(inner_parallel) {"local_machine"} else {NULL},
+              date_type = date_type, 
+              fast = FALSE
+            )
+          
+          fs_list <- append(fs_list, list(R2 = R2_fs_list))
+        }
+      }
+      
+      # start tuning hyperparams
       par_info <- par_start(
         run_info = run_info,
         parallel_processing = if (inner_parallel) {
@@ -394,6 +437,30 @@ train_models <- function(run_info,
             )
 
           workflow_final <- workflow$Model_Workflow[[1]]
+          
+          # adjust for selected features
+          if(feature_selection & model %in% fs_model_list) {
+            
+            if(data_prep_recipe == 'R1') {
+              final_features_list <- fs_list$R1
+            } else {
+              final_features_list <- fs_list$R2
+            }
+            
+            final_features_list <- final_features_list[final_features_list != "Combo"]
+            final_features_list <- final_features_list[final_features_list != "Target"]
+
+            updated_recipe <- workflow$Model_Workflow[[1]] %>%
+              workflows::extract_recipe(estimated = FALSE) %>%
+              recipes::remove_role(tidyselect::everything(), old_role = "predictor") %>%
+              recipes::update_role(tidyselect::all_of(unique(c(final_features_list, "Date"))), 
+                                   new_role = "predictor")
+            
+            workflow_final <- workflow$Model_Workflow[[1]] %>%
+              workflows::update_recipe(updated_recipe)
+          } else {
+            workflow_final <- workflow$Model_Workflow[[1]]
+          }
 
           # get hyperparameters
           hyperparameters <- model_hyperparameter_tbl %>%
@@ -576,8 +643,29 @@ train_models <- function(run_info,
               Model_Name == model,
               Model_Recipe == recipe
             )
-
-          workflow_final <- workflow$Model_Workflow[[1]]
+          
+          # adjust for selected features
+          if(feature_selection & model %in% fs_model_list) {
+            
+            if(recipe == 'R1') {
+              final_features_list <- fs_list$R1
+            } else {
+              final_features_list <- fs_list$R2
+            }
+            
+            final_features_list <- final_features_list[final_features_list != "Combo"]
+            final_features_list <- final_features_list[final_features_list != "Target"]
+            
+            updated_recipe <- workflow$Model_Workflow[[1]] %>%
+              workflows::extract_recipe(estimated = FALSE) %>%
+              recipes::remove_role(tidyselect::everything(), old_role = "predictor") %>%
+              recipes::update_role(tidyselect::any_of(unique(c(final_features_list, "Date"))), new_role = "predictor")
+            
+            workflow_final <- workflow$Model_Workflow[[1]] %>%
+              workflows::update_recipe(updated_recipe)
+          } else {
+            workflow_final <- workflow$Model_Workflow[[1]]
+          }
 
           # get hyperparameters
           hyperparameters <- model_hyperparameter_tbl %>%
