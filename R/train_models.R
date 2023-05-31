@@ -130,6 +130,8 @@ train_models <- function(run_info,
     unique()
 
   global_model_list <- c("cubist", "glmnet", "mars", "svm-poly", "svm-rbf", "xgboost")
+  fs_model_list <- c(global_model_list, 'arima-boost', 'prophet-boost', 'prophet-xregs', 
+                     'nnetar-xregs')
 
   if (sum(model_workflow_list %in% global_model_list) == 0 & run_global_models) {
     run_global_models <- FALSE
