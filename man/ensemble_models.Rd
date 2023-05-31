@@ -6,6 +6,7 @@
 \usage{
 ensemble_models(
   run_info,
+  feature_selection = TRUE,
   parallel_processing = NULL,
   inner_parallel = FALSE,
   num_cores = NULL,

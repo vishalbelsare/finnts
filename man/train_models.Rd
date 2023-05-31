@@ -9,6 +9,7 @@ train_models(
   run_global_models = FALSE,
   run_local_models = TRUE,
   global_model_recipes = c("R1"),
+  feature_selection = TRUE,
   negative_forecast = FALSE,
   parallel_processing = NULL,
   inner_parallel = FALSE,

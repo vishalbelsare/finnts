@@ -1,4 +1,14 @@
-
+#' Select Features
+#'
+#' @param input_data initial historical data
+#' @param run_info run info
+#' @param train_test_data train test data
+#' @param parallel_processing parallel processing
+#' @param date_type date_type
+#' @param fast fast
+#'
+#' @return list of best features to use
+#' @noRd
 select_features <- function(input_data,
                             run_info,
                             train_test_data, 
@@ -124,65 +134,12 @@ select_features <- function(input_data,
   return(fs_list_final)
 }
 
-# 
-# feature_voting_fn <- function(
-#     multicolinearity_tbl, 
-#     target_corr_tbl, 
-#     vip_rf_tbl, 
-#     vip_lm_tbl, 
-#     boruta_tbl, 
-#     lofo_tbl) {
-#   
-#   
-#   final_feature_votes <- lofo_tbl %>%
-#     dplyr::filter(Imp >= 0) %>%
-#     dplyr::rename(Feature = LOFO_Var) %>%
-#     dplyr::mutate(Vote = 1, 
-#                   Auto_Accept = 0) %>%
-#     dplyr::select(Feature, Vote, Auto_Accept) %>%
-#     rbind(
-#       tibble::tibble(
-#         Feature = multicolinearity_tbl, 
-#         Vote = 1, 
-#         Auto_Accept = 0
-#       )
-#     ) %>%
-#     rbind(
-#       target_corr_tbl %>%
-#         dplyr::rename(Feature = term) %>%
-#         dplyr::mutate(Vote = 1, 
-#                       Auto_Accept = 0) %>%
-#         dplyr::select(Feature, Vote, Auto_Accept)
-#     ) %>%
-#     rbind(
-#       vip_rf_tbl %>%
-#         dplyr::rename(Feature = Variable) %>%
-#         dplyr::mutate(Vote = 1, 
-#                       Auto_Accept = 0) %>%
-#         dplyr::select(Feature, Vote, Auto_Accept)
-#     ) %>%
-#     rbind(
-#       tibble::tibble(Feature = input_data %>%
-#                        dplyr::select(tidyselect::any_of(vip_lm_tbl$Variable)) %>% 
-#                        colnames(), 
-#                      Vote = 1, 
-#                      Auto_Accept = 1)
-#     ) %>%
-#     rbind(
-#       tibble::tibble(
-#         Feature = boruta_tbl, 
-#         Vote = 1, 
-#         Auto_Accept = 0
-#       )
-#     ) %>%
-#     dplyr::group_by(Feature) %>%
-#     dplyr::summarise(Votes = sum(Vote), 
-#                      Auto_Accept = sum(Auto_Accept)) %>%
-#     dplyr::arrange(desc(Votes))
-#   
-#   return(final_feature_votes)
-# }
-
+#' Multicolinearity Filter
+#'
+#' @param data data
+#'
+#' @return list of features that are not correlated with one another
+#' @noRd
 multicolinearity_fn <- function(data) {
   recipes::recipe(
     Target ~ .,
@@ -195,6 +152,13 @@ multicolinearity_fn <- function(data) {
     colnames()
 }
 
+#' Target Correlation Filter 
+#'
+#' @param data data
+#' @param threshold threshold
+#'
+#' @return list of features that are correlated to target variable
+#' @noRd
 target_corr_fn <- function(data, 
                            threshold = 0.5) {
   corrr::correlate(data, quiet = TRUE) %>%
@@ -202,6 +166,13 @@ target_corr_fn <- function(data,
     dplyr::select(term, Target)
 }
 
+#' Random Forest Variable Importance
+#'
+#' @param data data
+#' @param seed seed
+#'
+#' @return list of most important features in random forest model
+#' @noRd
 vip_rf_fn <- function(data, 
                       seed = 123) {
   
@@ -227,6 +198,13 @@ vip_rf_fn <- function(data,
   return(ranger_vip_fs)
 }
 
+#' Linear Regression Variable Importance
+#'
+#' @param data data
+#' @param seed seed
+#'
+#' @return list of most important features in lasso regression model
+#' @noRd
 vip_lm_fn <- function(data, 
                       seed = 123) {
   
@@ -257,6 +235,13 @@ vip_lm_fn <- function(data,
   return(lm_vip_fs)
 }
 
+#' Cubist Variable Importance
+#'
+#' @param data data
+#' @param seed seed
+#'
+#' @return list of most important features in cubist rules model
+#' @noRd
 vip_cubist_fn <- function(data,
                           seed = 123) {
   
@@ -286,12 +271,29 @@ vip_cubist_fn <- function(data,
   return(cubist_vip_fs)
 }
 
+#' Feature Selection Using Boruta
+#'
+#' @param data data
+#' @param iterations iterations
+#'
+#' @return list of most important features in boruta selection process
+#' @noRd
 boruta_fn <- function(data, 
                       iterations = 100) {
   Boruta::Boruta(Target~.,data=data, maxRuns = iterations) %>%
     Boruta::getSelectedAttributes()
 }
 
+#' Leave One Feature Out Feature Importance
+#'
+#' @param run_info run info
+#' @param data data
+#' @param train_test_splits train test splits
+#' @param parallel_processing parallel_processing
+#' @param pca pca
+#'
+#' @return list of most important features using LOFO process
+#' @noRd
 lofo_fn <- function(run_info, 
                     data, 
                     train_test_splits, 
