@@ -232,6 +232,9 @@ train_models <- function(run_info,
       )
     }
   }
+  
+  # ensure feature selection functions get exported
+  multicolinearity_fn <- multicolinearity_fn
 
   # parallel run info
   par_info <- par_start(
