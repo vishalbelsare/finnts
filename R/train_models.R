@@ -232,9 +232,6 @@ train_models <- function(run_info,
       )
     }
   }
-  
-  # ensure feature selection functions get exported
-  multicolinearity_fn <- multicolinearity_fn
 
   # parallel run info
   par_info <- par_start(
@@ -264,9 +261,9 @@ train_models <- function(run_info,
       model_recipe_tbl <- get_recipe_data(run_info,
         combo = x
       )
-
+      
+      # ensure variables get exported
       if (inner_parallel) {
-        # ensure variables get exported
         model_train_test_tbl <- model_train_test_tbl
         model_workflow_tbl <- model_workflow_tbl
         model_hyperparameter_tbl <- model_hyperparameter_tbl
@@ -275,6 +272,9 @@ train_models <- function(run_info,
         negative_fcst_adj <- negative_fcst_adj
         negative_forecast <- negative_forecast
       }
+      
+      # ensure feature selection functions get exported
+      multicolinearity_fn <- multicolinearity_fn
 
       # tune models
       tune_iter_list <- model_train_test_tbl %>%
