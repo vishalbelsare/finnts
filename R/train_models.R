@@ -275,6 +275,12 @@ train_models <- function(run_info,
       
       # ensure feature selection functions get exported
       multicolinearity_fn <- multicolinearity_fn
+      lofo_fn <- lofo_fn
+      target_corr_fn <- target_corr_fn
+      vip_rf_fn <- vip_rf_fn
+      vip_lm_fn <- vip_lm_fn
+      vip_cubist_fn <- vip_cubist_fn
+      boruta_fn <- boruta_fn
 
       # tune models
       tune_iter_list <- model_train_test_tbl %>%
@@ -321,8 +327,7 @@ train_models <- function(run_info,
             select_features(
               run_info = run_info, 
               train_test_data = model_train_test_tbl, 
-              # parallel_processing = if(inner_parallel) {"local_machine"} else {NULL}, 
-              parallel_processing = "local_machine", 
+              parallel_processing = if(inner_parallel) {"local_machine"} else {NULL},
               date_type = date_type, 
               fast = FALSE
             )
