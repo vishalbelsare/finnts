@@ -273,7 +273,7 @@ train_models <- function(run_info,
         negative_forecast <- negative_forecast
       }
       
-      # ensure feature selection functions get exported
+      # ensure feature selection objects get exported
       multicolinearity_fn <- multicolinearity_fn
       lofo_fn <- lofo_fn
       target_corr_fn <- target_corr_fn
@@ -282,6 +282,7 @@ train_models <- function(run_info,
       vip_cubist_fn <- vip_cubist_fn
       boruta_fn <- boruta_fn
       feature_selection <- feature_selection
+      fs_model_list <- fs_model_list
 
       # tune models
       tune_iter_list <- model_train_test_tbl %>%
