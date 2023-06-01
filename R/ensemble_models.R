@@ -231,6 +231,17 @@ ensemble_models <- function(run_info,
       # run feature selection
       if(feature_selection) {
         
+        # ensure feature selection objects get exported
+        multicolinearity_fn <- multicolinearity_fn
+        lofo_fn <- lofo_fn
+        target_corr_fn <- target_corr_fn
+        vip_rf_fn <- vip_rf_fn
+        vip_lm_fn <- vip_lm_fn
+        vip_cubist_fn <- vip_cubist_fn
+        boruta_fn <- boruta_fn
+        feature_selection <- feature_selection
+        fs_model_list <- fs_model_list
+         
         fs_list <- prep_ensemble_tbl %>%
           select_features(
             run_info, 
