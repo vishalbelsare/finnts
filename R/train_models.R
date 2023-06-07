@@ -320,7 +320,7 @@ train_models <- function(run_info,
         x = tune_iter_list %>%
           dplyr::select(Model) %>%
           dplyr::distinct() %>%
-          pull(),
+          dplyr::pull(),
         .combine = "rbind",
         .errorhandling = "stop",
         .verbose = FALSE,
