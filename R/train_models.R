@@ -346,7 +346,7 @@ train_models <- function(run_info,
           }
           
           final_wflow <- tune::finalize_workflow(workflow, best_param)
-          wflow_fit <- fit(final_wflow, prep_data %>% tidyr::drop_na(Target))
+          wflow_fit <- generics::fit(final_wflow, prep_data %>% tidyr::drop_na(Target))
           
           # refit on all train test splits
           refit_tbl <- tune::fit_resamples(
