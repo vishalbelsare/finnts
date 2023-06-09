@@ -284,7 +284,6 @@ train_models <- function(run_info,
       
       inner_cl <- par_info$cl
       inner_packages <- par_info$packages
-      `%op%` <- par_info$foreach_operator
       
       model_tbl <- foreach::foreach(
         model_run = model_workflow_tbl %>%
@@ -330,7 +329,9 @@ train_models <- function(run_info,
             object = workflow,
             resamples = create_splits(prep_data, model_train_test_tbl %>% dplyr::filter(Run_Type == 'Validation')),
             grid = hyperparameters %>% dplyr::select(-Hyperparameter_Combo),
-            control = tune::control_grid(allow_par = inner_parallel)) %>%
+            control = tune::control_grid(allow_par = inner_parallel, 
+                                         pkgs = inner_packages, 
+                                         parallel_over = "everything")) %>%
             base::suppressWarnings()
           
           best_param <- tune::select_best(tune_results, metric = "rmse")
@@ -354,7 +355,9 @@ train_models <- function(run_info,
             resamples = create_splits(prep_data, model_train_test_tbl),
             metrics = NULL,
             control = tune::control_resamples(allow_par = inner_parallel,
-                                              save_pred = TRUE)
+                                              save_pred = TRUE, 
+                                              pkgs = inner_packages,
+                                              parallel_over = "everything")
           )
           
           final_fcst <- tune::collect_predictions(refit_tbl) %>%
