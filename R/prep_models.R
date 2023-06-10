@@ -56,7 +56,7 @@ prep_models <- function(run_info,
                         models_to_run = NULL,
                         models_not_to_run = NULL,
                         run_ensemble_models = TRUE,
-                        pca = FALSE,
+                        pca = NULL,
                         num_hyperparameters = 10) {
 
   # check input values
@@ -432,8 +432,10 @@ model_workflows <- function(run_info,
 
   if (is.null(pca) & date_type %in% c("day", "week")) {
     pca <- TRUE
-  } else {
+  } else if (is.null(pca)) {
     pca <- FALSE
+  } else {
+    # do nothing
   }
 
   # check if input values have changed

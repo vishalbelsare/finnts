@@ -29,6 +29,7 @@ get_recipie_combo <- function(train_data) {
 #' @param character_factor is character factor
 #' @param center_scale Center and scale
 #' @param one_hot True or False
+#' @param pca PCA
 #' @return configurable recipe
 #' @noRd
 get_recipie_configurable <- function(train_data,
