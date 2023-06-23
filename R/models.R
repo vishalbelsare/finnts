@@ -612,7 +612,7 @@ meanf <- function(train_data,
     get_recipie_simple()
 
   model_spec_meanf <- modeltime::window_reg(
-    window_size = frequency
+    window_size = round(frequency)
   ) %>%
     parsnip::set_engine(
       engine = "window_function",
@@ -816,7 +816,7 @@ snaive <- function(train_data,
     get_recipie_simple()
 
   model_spec_snaive <- modeltime::naive_reg(
-    seasonal_period = frequency
+    seasonal_period = round(frequency)
   ) %>%
     parsnip::set_engine("snaive")
 
@@ -837,7 +837,7 @@ snaive <- function(train_data,
 #' @noRd
 stlm_arima <- function(train_data,
                        seasonal_period) {
-  seasonal_period_stlm_arima <- seasonal_period
+  seasonal_period_stlm_arima <- round(seasonal_period)
 
   recipe_spec_stlm_arima <- train_data %>%
     get_recipie_simple()
@@ -866,7 +866,7 @@ stlm_arima <- function(train_data,
 #' @noRd
 stlm_ets <- function(train_data,
                      seasonal_period) {
-  seasonal_period_stlm_ets <- seasonal_period
+  seasonal_period_stlm_ets <- round(seasonal_period)
 
   recipe_spec_stlm_ets <- train_data %>%
     get_recipie_simple()
