@@ -400,7 +400,8 @@ ensemble_models <- function(run_info,
               by = ".row"
             ) %>%
             dplyr::mutate(Hyperparameter_ID = hyperparameter_id) %>%
-            dplyr::select(-.row, -.config)
+            dplyr::select(-.row, -.config) %>%
+            negative_fcst_adj(negative_forecast)
           
           combo_id <- unique(final_fcst$Combo)
           
