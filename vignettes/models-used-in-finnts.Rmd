@@ -7,7 +7,6 @@ vignette: >
   %\VignetteEncoding{UTF-8}
 ---
 
-
 ```{r, include = FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
@@ -23,11 +22,12 @@ reactable::reactable(
   data.frame() %>%
     rbind(data.frame(Model = "arima", Type = "univariate, local", Underlying.Package = "modeltime, forecast", Description = "Regression model that is based on finding relationships between lagged values of the target variable you are trying to forecast.")) %>%
     rbind(data.frame(Model = "arima-boost", Type = "multivariate, local", Underlying.Package = "modeltime, forecast, xgboost", Description = "Arima model (refer to arima) that models the trend compoent of target variable, then uses xgboost model (refer to xgboost) to train on the remaining residuals.")) %>%
-    rbind(data.frame(Model = "cubist", Type = "multivariate, local, global, ensemble", Underlying.Package = "rules", Description = "Hybrid of tree based and linear regression approach. Many decision trees are built, but regression coefficients are used at each terminal node instead of averging values in other tree based approaches.")) %>%
+    rbind(data.frame(Model = "arimax", Type = "multivariate, local", Underlying.Package = "modeltime, forecast", Description = "ARIMA model that incorporates external regressors and other engineered features.")) %>%
+    rbind(data.frame(Model = "cubist", Type = "multivariate, local, ensemble", Underlying.Package = "rules", Description = "Hybrid of tree based and linear regression approach. Many decision trees are built, but regression coefficients are used at each terminal node instead of averging values in other tree based approaches.")) %>%
     rbind(data.frame(Model = "croston", Type = "univariate, local", Underlying.Package = "modeltime, forecast", Description = "Useful for intermittent demand forecasting, aka when there are a lot of periods of zero values. Involves simple exponential smoothing on non-zero values of target variable and another application of seasonal exponential smoothing on periods between non-zero elements of the target variable. Refer to ets for more details on exponential smoothing.")) %>%
     rbind(data.frame(Model = "ets", Type = "univariate, local", Underlying.Package = "modeltime, forecast", Description = "Forecasts produced using exponential smoothing methods are weighted averages of past observations, with the weights decaying exponentially as the observations get older. Exponential smoothing models try to forecast the components of a time series which can be broken down in to error, trend, and seasonality. These components can be forecasted separately then either added or multiplied together to get the final forecast output.")) %>%
-    rbind(data.frame(Model = "glmnet", Type = "multivariate, local, global, ensemble", Underlying.Package = "parsnip, glmnet", Description = "Linear regression (line of best fit) with regularization to help prevent overfitting and built in variable selection.")) %>%
-    rbind(data.frame(Model = "mars", Type = "multivariate, local, global", Underlying.Package = "parsnip, earth", Description = "An extension to linear regression that captures nonlinearities and interactions between variables.")) %>%
+    rbind(data.frame(Model = "glmnet", Type = "multivariate, local, ensemble", Underlying.Package = "parsnip, glmnet", Description = "Linear regression (line of best fit) with regularization to help prevent overfitting and built in variable selection.")) %>%
+    rbind(data.frame(Model = "mars", Type = "multivariate, local", Underlying.Package = "parsnip, earth", Description = "An extension to linear regression that captures nonlinearities and interactions between variables.")) %>%
     rbind(data.frame(Model = "meanf", Type = "univariate, local", Underlying.Package = "modeltime, forecast", Description = "Simple average of previous year of target variable values.")) %>%
     rbind(data.frame(Model = "nnetar", Type = "univariate, local", Underlying.Package = "modeltime, forecast", Description = "A neural network autoregression model is a traditional feed forward neural network (sometimes called an perceptron) that is fed by lagged values of the historical data set (similar to ARIMA).")) %>%
     rbind(data.frame(Model = "nnetar-xregs", Type = "multivariate, local", Underlying.Package = "modeltime, forecast", Description = "Same approach as nnetar but can incorporate other features in addition to the target variable, like external regressors and date features.")) %>%
@@ -37,12 +37,11 @@ reactable::reactable(
     rbind(data.frame(Model = "snaive", Type = "univariate, local", Underlying.Package = "modeltime, forecast", Description = "Simple model that takes the value from the same period in the previous year.")) %>%
     rbind(data.frame(Model = "stlm-arima", Type = "univariate, local", Underlying.Package = "modeltime, forecast", Description = "Applies an STL decomposition (breaks out target variable into seasonal, trend, and error/residual/remainder components), models the seasonally adjusted data, reseasonalizes, and returns the forecasts. An arima model (refer to arima) is used in forecasting the seasonaly adjusted data.")) %>%
     rbind(data.frame(Model = "stlm-ets", Type = "univariate, local", Underlying.Package = "modeltime, forecast", Description = "Applies an STL decomposition (breaks out target variable into seasonal, trend, and error/residual/remainder components), models the seasonally adjusted data, reseasonalizes, and returns the forecasts. An ets model (refer to ets) is used in forecasting the seasonaly adjusted data.")) %>%
-    rbind(data.frame(Model = "svm-poly", Type = "multivariate, local, global, ensemble", Underlying.Package = "parsnip, kernlab", Description = "Uses a nonlinear function, specifically a polynomial function, to create a regression line of the target variable.")) %>%
-    rbind(data.frame(Model = "svm-rbf", Type = "multivariate, local, global, ensemble", Underlying.Package = "parsnip, kernlab", Description = "Uses a nonlinear function, specifically a radial basis function, to create a regression line of the target variable.")) %>%
+    rbind(data.frame(Model = "svm-poly", Type = "multivariate, local, ensemble", Underlying.Package = "parsnip, kernlab", Description = "Uses a nonlinear function, specifically a polynomial function, to create a regression line of the target variable.")) %>%
+    rbind(data.frame(Model = "svm-rbf", Type = "multivariate, local, ensemble", Underlying.Package = "parsnip, kernlab", Description = "Uses a nonlinear function, specifically a radial basis function, to create a regression line of the target variable.")) %>%
     rbind(data.frame(Model = "tbats", Type = "univariate, local", Underlying.Package = "modeltime, forecast", Description = "A spin off of the traditional ets model (refer to ets), with some additional components to capture multiple seasonalities.")) %>%
     rbind(data.frame(Model = "theta", Type = "univariate, local", Underlying.Package = "modeltime, forecast", Description = "Theta is similar to exponential smoothing (refer to ets) but with another component called drift. Adding drift to exponential smoothing allows the forecast to increase or decrease over time, where the amount of change over time (called the drift) is set to be the average change seen within the historical data.")) %>%
-    rbind(data.frame(Model = "xgboost", Type = "multivariate, local, global, ensemble", Underlying.Package = "parsnip, xgboost", Description = "Builds many decision trees (similar to random forests), but predictions that are initially inaccurate are applied more weight in subsequent training rounds to increase accuracy across all predictions."))
-  , 
+    rbind(data.frame(Model = "xgboost", Type = "multivariate, local, global, ensemble", Underlying.Package = "parsnip, xgboost", Description = "Builds many decision trees (similar to random forests), but predictions that are initially inaccurate are applied more weight in subsequent training rounds to increase accuracy across all predictions.")),
   defaultColDef = colDef(
     header = function(value) gsub(".", " ", value, fixed = TRUE),
     cell = function(value) format(value, nsmall = 1),
@@ -51,29 +50,43 @@ reactable::reactable(
     headerStyle = list(background = "#f7f7f8")
   ),
   columns = list(
-    Description = colDef(minWidth = 140, align = "left")  # overrides the default
+    Description = colDef(minWidth = 140, align = "left") # overrides the default
   ),
   bordered = TRUE,
   highlight = TRUE
 )
-
 ```
 
 ### Univariate vs Multivariate Models
 
-* **Univariate models** only use the date and target variable values when producing a forecast. They are mostly common on various statistical forecasting models like arima and ets. 
+-   **Univariate models** only use the date and target variable values when producing a forecast. They are mostly common on various statistical forecasting models like arima and ets.
 
-* **Multivariate models** leverage many features when producing a forecast, provided as input data before model training. These features can be automatically created using internal feature engineering techniques within the package, or provided as external regressors. Most common machine learning models today, like xgboost and cubist, are multivariate models. An important thing to note is that multivariate models provided in the package can leverage different recipes of feature engineering, that contain different techniques of creating features. These can be identified by seeing the letter "R" followed by a number like "1" or "2". More info can be found in the feature engineering vignette. 
+-   **Multivariate models** leverage many features when producing a forecast, provided as input data before model training. These features can be automatically created using internal feature engineering techniques within the package, or provided as external regressors. Most common machine learning models today, like xgboost and cubist, are multivariate models. An important thing to note is that multivariate models provided in the package can leverage different recipes of feature engineering, that contain different techniques of creating features. These can be identified by seeing the letter "R" followed by a number like "1" or "2". More info can be found in the feature engineering vignette.
 
 ### Global vs Local Models
 
-* **Global models** take the entire data set across all individual time series and model them all at once within a single model. Global models are only ran if the input data contains more than one individual time series. 
+-   **Global models** take the entire data set across all individual time series and model them all at once within a single model. Global models are only ran if the input data contains more than one individual time series.
 
-* **Local models** take each individual time series from the input data and model them separately. 
+-   **Local models** take each individual time series from the input data and model them separately.
 
 ### Ensemble Models
 
 Ensemble models are trained on predictions made by individual models. For example, a glmnet ensemble model takes forecasts made by each individual model and feeds them as training data into a glmnet model.
+
+### Multistep Horizon Models
+
+By default within `prep_models()`, the `multistep_horizon` argument is set to FALSE. If set to TRUE, a multistep horizon approach is taken for specific multivariate models trained on the R1 feature engineering recipe. Below are the models that can run as multistep. 
+
+- cubist
+- glmnet
+- mars
+- svm_poly
+- svm-rbf
+- xgboost
+
+A multistep model optimizes for each period in a forecast horizon. Let's take an example of a monthly data set with a forecast horizon of 3. When creating the features for the R1 recipe, finnts will create lags of 1, 2, 3, 6, 9, 12 months. Then when training a multistep model it will iteratively use specific features to train the model. First it will train a model on the first forecast horizon (H1), where it will use all available feature lags. Then for H2 it will use lags of 2 or more. Finally for H3 it will use lags of 3 or more. So the final model is actually a collection of multiple models that each trained on a specific horizon. This lets the model optimize for using all available data when creating the forecast. So in our example, one glmnet model actually has three separate horizon specific models under the hood. 
+
+A few more things to mention. If `multistep_horizon` is TRUE then other multivariate models like arima-boost or prophet-xregs will not run a multistep horizon approach. Instead they will use lags that are equal to or greater than the forecast horizon. One set of hyperparameters will be chosen for each multistep model, meaning glmnet will only use one combination of final hyperparameters and apply it to each horizon model. Multistep models are not ran for the R2 recipe, since it has it's own way of dealing with multiple horizons. Finally if `feature_selection` is turned on, it will be ran for each horizon specific model, meaning for a 3 month forecast horizon the feature selection process will be ran 3 times. One for each combination of features tied to a specific horizon. 
 
 ## Leveraging the Tidymodels Framework
 

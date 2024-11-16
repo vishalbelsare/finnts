@@ -1,8 +1,52 @@
-# finnts 0.3.0.9000 (DEVELOPMENT VERSION)
+# finnts 0.5.9001 (development version)
+
+## Improvements
+
+-   Shortened global model list to just xgboost
+-   Faster xgboost model training for larger datasets 
+-   Faster feature selection for global model training
+
+## Bug Fixes
+
+-   Error in formatting of training data for global models
+
+# finnts 0.5.0
+
+## Improvements
+
+-   Added support for hierarchical forecasting with external regressors
+-   Allow global models for hierarchical forecasts
+-   Multistep horizon forecasts for R1 recipe, listed as `multistep_horizon` within `prep_data()` 
+-   Always save the most accurate model average, regardless if selected as best model. This allows for improved scaling with large data sets.
+-   Automatically condense large forecasts (+3k time series) into smaller amount of files to make it easier to read forecast outputs
+-   Improved weighted MAPE calculation across all time series
+-   Changed default for box_cox argument in `prep_data()` to FALSE
+-   Support for spark version 3.4 in Azure Synapse/Fabric
+
+## Bug Fixes
+
+-   Error in run_type column join in final forecast output
+-   Error in running feature selection
+
+## Breaking Changes
+
+-   Minimum R version now set to R 4.0 to comply with package dependency minimum version for tune
+
+# finnts 0.4.0
 
 ## Improvements
 
 -   Tidymodels speed up
+-   Added external regressor support for ARIMA by introducing a new model option of `arimax`, which uses engineered features in addition to any external regressors supplied.
+-   Automated feature selection, refer to feature selection vignette for more details
+-   Error handling in hierarchical forecast reconciliation
+-   Box-cox and differencing transformations
+-   Added new function, `list_models()`, that lists available models in the package 
+
+## Bug Fixes
+
+-   Best model selection
+-   Hierarchical forecast reconciliation
 
 # finnts 0.3.0
 

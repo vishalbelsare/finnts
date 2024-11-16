@@ -44,7 +44,6 @@ set_run_info <- function(experiment_name = "finn_fcst",
                          data_output = "csv",
                          object_output = "rds",
                          add_unique_id = TRUE) {
-
   # initial input checks
   if (!inherits(run_name, c("NULL", "character"))) {
     stop("`run_name` must either be a NULL or a string")
@@ -151,12 +150,11 @@ set_run_info <- function(experiment_name = "finn_fcst",
     base::suppressWarnings()
 
   if (nrow(log_df) > 0 & add_unique_id == FALSE) {
-
     # check if input values have changed
     current_log_df <- tibble::tibble(
       experiment_name = experiment_name,
       run_name = run_name,
-      path = gsub("synfs/\\d+", "synfs", path), # remove synapse id to prevent issues
+      path = gsub("synfs(/notebook)?/\\d+", "synfs", path), # remove synapse id to prevent issues
       data_output = data_output,
       object_output = object_output
     ) %>%
@@ -164,7 +162,7 @@ set_run_info <- function(experiment_name = "finn_fcst",
 
     prev_log_df <- log_df %>%
       dplyr::select(colnames(current_log_df)) %>%
-      dplyr::mutate(path = gsub("synfs/\\d+", "synfs", path)) %>% # remove synapse id to prevent issues
+      dplyr::mutate(path = gsub("synfs(/notebook)?/\\d+", "synfs", path)) %>% # remove synapse id to prevent issues
       data.frame()
 
     if (hash_data(current_log_df) != hash_data(prev_log_df)) {
@@ -266,7 +264,6 @@ get_run_info <- function(experiment_name = NULL,
                          run_name = NULL,
                          storage_object = NULL,
                          path = NULL) {
-
   # input checks
   if (!inherits(run_name, c("NULL", "character"))) {
     stop("`run_name` must either be a NULL or a string")

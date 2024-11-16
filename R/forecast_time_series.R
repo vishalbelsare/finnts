@@ -70,6 +70,7 @@
 #' @param average_models If TRUE, create simple averages of individual models.
 #' @param max_model_average Max number of models to average together. Will create model averages for 2 models up until input value
 #'   or max number of models ran.
+#' @param feature_selection Implement feature selection before model training
 #' @param weekly_to_daily If TRUE, convert a week forecast down to day by evenly splitting across each day of week. Helps when aggregating
 #'   up to higher temporal levels like month or quarter.
 #' @param seed Set seed for random number generator. Numeric value.
@@ -139,6 +140,7 @@ forecast_time_series <- function(run_info = NULL,
                                  run_ensemble_models = NULL,
                                  average_models = TRUE,
                                  max_model_average = 3,
+                                 feature_selection = FALSE,
                                  weekly_to_daily = TRUE,
                                  seed = 123,
                                  run_model_parallel = FALSE,
@@ -154,67 +156,70 @@ forecast_time_series <- function(run_info = NULL,
   }
 
   prep_data(
-    run_info,
-    input_data,
-    combo_variables,
-    target_variable,
-    date_type,
-    forecast_horizon,
-    external_regressors,
-    hist_start_date,
-    hist_end_date,
-    combo_cleanup_date,
-    fiscal_year_start,
-    clean_missing_values,
-    clean_outliers,
-    forecast_approach,
-    parallel_processing,
-    num_cores,
-    target_log_transformation,
-    fourier_periods,
-    lag_periods,
-    rolling_window_periods,
-    recipes_to_run
+    run_info = run_info,
+    input_data = input_data,
+    combo_variables = combo_variables,
+    target_variable = target_variable,
+    date_type = date_type,
+    forecast_horizon = forecast_horizon,
+    external_regressors = external_regressors,
+    hist_start_date = hist_start_date,
+    hist_end_date = hist_end_date,
+    combo_cleanup_date = combo_cleanup_date,
+    fiscal_year_start = fiscal_year_start,
+    clean_missing_values = clean_missing_values,
+    clean_outliers = clean_outliers,
+    forecast_approach = forecast_approach,
+    parallel_processing = parallel_processing,
+    num_cores = num_cores,
+    target_log_transformation = target_log_transformation,
+    fourier_periods = fourier_periods,
+    lag_periods = lag_periods,
+    rolling_window_periods = rolling_window_periods,
+    recipes_to_run = recipes_to_run
   )
 
-  prep_models(run_info,
-    back_test_scenarios,
-    back_test_spacing,
-    models_to_run,
-    models_not_to_run,
-    run_ensemble_models,
-    pca,
+  prep_models(
+    run_info = run_info,
+    back_test_scenarios = back_test_scenarios,
+    back_test_spacing = back_test_spacing,
+    models_to_run = models_to_run,
+    models_not_to_run = models_not_to_run,
+    run_ensemble_models = run_ensemble_models,
+    pca = pca,
     num_hyperparameters = 10,
-    seed
+    seed = seed
   )
 
-  train_models(run_info,
-    run_global_models,
-    run_local_models,
+  train_models(
+    run_info = run_info,
+    run_global_models = run_global_models,
+    run_local_models = run_local_models,
     global_model_recipes = "R1",
-    negative_forecast,
-    parallel_processing,
-    inner_parallel,
-    num_cores,
-    seed
+    feature_selection = feature_selection,
+    negative_forecast = negative_forecast,
+    parallel_processing = parallel_processing,
+    inner_parallel = inner_parallel,
+    num_cores = num_cores,
+    seed = seed
   )
 
   ensemble_models(
-    run_info,
-    parallel_processing,
-    inner_parallel,
-    num_cores,
-    seed
+    run_info = run_info,
+    parallel_processing = parallel_processing,
+    inner_parallel = inner_parallel,
+    num_cores = num_cores,
+    seed = seed
   )
 
   final_models(
-    run_info,
-    average_models,
-    max_model_average,
-    weekly_to_daily,
-    parallel_processing,
-    inner_parallel,
-    num_cores
+    run_info = run_info,
+    average_models = average_models,
+    max_model_average = max_model_average,
+    weekly_to_daily = weekly_to_daily,
+    parallel_processing = parallel_processing,
+    inner_parallel = inner_parallel,
+    num_cores = num_cores
   )
 
   if (return_data) {
@@ -261,11 +266,11 @@ forecast_backwards_compatibility <- function(run_info,
         dplyr::collect() %>%
         tidyr::unite(
           col = "Combo",
-          combo_variables,
+          tidyselect::all_of(combo_variables),
           sep = "---",
           remove = FALSE
         ) %>%
-        dplyr::rename(Target = target_variable) %>%
+        dplyr::rename(Target = tidyselect::all_of(target_variable)) %>%
         dplyr::mutate(
           Model_ID = NA,
           lo_95 = Target,
@@ -273,7 +278,7 @@ forecast_backwards_compatibility <- function(run_info,
           hi_80 = Target,
           hi_95 = Target
         ) %>%
-        dplyr::select(Combo, combo_variables, Model_ID, Date, Target, lo_95, lo_80, hi_80, hi_95)
+        dplyr::select(Combo, tidyselect::all_of(combo_variables), Model_ID, Date, Target, lo_95, lo_80, hi_80, hi_95)
     ) %>%
     dplyr::mutate(Type = ifelse(is.na(Model_ID), "Historical", "Forecast")) %>%
     dplyr::relocate(Type, .before = Date) %>%
@@ -293,7 +298,7 @@ forecast_backwards_compatibility <- function(run_info,
     dplyr::filter(Run_Type == "Back_Test") %>%
     dplyr::mutate(MAPE = abs((Forecast - Target) / Target)) %>%
     dplyr::select(
-      Combo, combo_variables, Train_Test_ID, Date, Model_ID, Horizon,
+      Combo, tidyselect::all_of(combo_variables), Train_Test_ID, Date, Model_ID, Horizon,
       Forecast, Target, MAPE, Best_Model
     ) %>%
     dplyr::rename(
@@ -318,7 +323,6 @@ forecast_backwards_compatibility <- function(run_info,
       dplyr::select(Combo, Model, Best_Model) %>%
       dplyr::distinct()
   } else {
-
     # read in unreconciled results
     best_model_tbl <- read_file(run_info,
       path = paste0(

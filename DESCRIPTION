@@ -1,6 +1,6 @@
 Package: finnts
 Title: Microsoft Finance Time Series Forecasting Framework
-Version: 0.3.0.9000
+Version: 0.5.0.9001
 Authors@R: 
     c(person(given = "Mike",
            family = "Tokic",
@@ -24,7 +24,7 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.1.1
+RoxygenNote: 7.3.2
 Imports: 
     cli,
     Cubist,
@@ -33,6 +33,7 @@ Imports:
     doParallel,
     dplyr,
     earth,
+    feasts,
     foreach,
     fs,
     generics,
@@ -49,6 +50,7 @@ Imports:
     plyr,
     purrr,
     recipes,
+    rlang,
     rsample,
     rules,
     snakecase,
@@ -63,16 +65,19 @@ Imports:
 Suggests: 
     arrow (>= 8.0.0),
     AzureStor,
+    Boruta,
+    corrr,
     knitr,
     Microsoft365R,
     notebookutils, 
+    qs,
     reactable,
     rmarkdown,
     sparklyr,
     testthat (>= 3.0.0), 
-    qs
+    vip
 Config/testthat/edition: 3
 Depends: 
-    R (>= 3.6.0), 
+    R (>= 4.0), 
     modeltime
 VignetteBuilder: knitr

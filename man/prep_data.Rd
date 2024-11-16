@@ -18,6 +18,8 @@ prep_data(
   fiscal_year_start = 1,
   clean_missing_values = TRUE,
   clean_outliers = FALSE,
+  box_cox = FALSE,
+  stationary = TRUE,
   forecast_approach = "bottoms_up",
   parallel_processing = NULL,
   num_cores = NULL,
@@ -25,7 +27,8 @@ prep_data(
   fourier_periods = NULL,
   lag_periods = NULL,
   rolling_window_periods = NULL,
-  recipes_to_run = NULL
+  recipes_to_run = NULL,
+  multistep_horizon = FALSE
 )
 }
 \arguments{
@@ -63,6 +66,10 @@ values.}
 
 \item{clean_outliers}{If TRUE, outliers are cleaned and inputted with values more in line with historical data.}
 
+\item{box_cox}{Apply box-cox transformation to normalize variance in data}
+
+\item{stationary}{Apply differencing to make data stationary}
+
 \item{forecast_approach}{How the forecast is created. The default of 'bottoms_up' trains models for each individual
 time series. Value of 'grouped_hierarchy' creates a grouped time series to forecast at while 'standard_hierarchy' creates
 a more traditional hierarchical time series to forecast, both based on the hts package.}
@@ -89,6 +96,8 @@ chooses these values based on date_type.}
 \item{recipes_to_run}{List of recipes to run on multivariate models that can run different recipes. A value of NULL runs
 all recipes, but only runs the R1 recipe for weekly and daily date types. A value of "all" runs all recipes, regardless
 of date type. A list like c("R1") or c("R2") would only run models with the R1 or R2 recipe.}
+
+\item{multistep_horizon}{Use a multistep horizon approach when training multivariate models with R1 recipe.}
 }
 \value{
 No return object. Feature engineered data is written to disk based on the output locations provided in

@@ -32,7 +32,7 @@ jobs:
           - {os: ubuntu-20.04,   r: 'release'}
           - {os: ubuntu-20.04,   r: 'oldrel-1'}
           - {os: ubuntu-20.04,   r: 'oldrel-2'}
-          - {os: ubuntu-20.04,   r: '3.6'} #3.6 is the min version for finnts
+          - {os: ubuntu-20.04,   r: '4.0'} # 4.0 is the min version for finnts
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
@@ -51,7 +51,7 @@ jobs:
           
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::rcmdcheck
+          extra-packages: any::rcmdcheck, vip=?ignore-before-r=4.1.0, Boruta=?ignore-before-r=4.1.0, corrr=?ignore-before-r=4.1.0
           needs: check
 
       - uses: r-lib/actions/check-r-package@v2

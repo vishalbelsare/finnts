@@ -1,4 +1,3 @@
-
 #' Train Individual Models
 #'
 #' @param run_info run info using the [set_run_info()] function
@@ -9,6 +8,7 @@
 #' @param run_local_models If TRUE, run models by individual time series as
 #'   local models.
 #' @param global_model_recipes Recipes to use in global models.
+#' @param feature_selection Implement feature selection before model training
 #' @param negative_forecast If TRUE, allow forecasts to dip below zero.
 #' @param parallel_processing Default of NULL runs no parallel processing and
 #'   forecasts each individual time series one after another. 'local_machine'
@@ -59,6 +59,7 @@ train_models <- function(run_info,
                          run_global_models = FALSE,
                          run_local_models = TRUE,
                          global_model_recipes = c("R1"),
+                         feature_selection = FALSE,
                          negative_forecast = FALSE,
                          parallel_processing = NULL,
                          inner_parallel = FALSE,
@@ -88,10 +89,13 @@ train_models <- function(run_info,
   combo_variables <- strsplit(log_df$combo_variables, split = "---")[[1]]
   date_type <- log_df$date_type
   forecast_approach <- log_df$forecast_approach
+  stationary <- log_df$stationary
+  box_cox <- log_df$box_cox
+  multistep_horizon <- log_df$multistep_horizon
+  forecast_horizon <- log_df$forecast_horizon
+  external_regressors <- ifelse(log_df$external_regressors == "NULL", NULL, strsplit(log_df$external_regressors, split = "---")[[1]])
 
   if (is.null(run_global_models) & date_type %in% c("day", "week")) {
-    run_global_models <- FALSE
-  } else if (forecast_approach != "bottoms_up") {
     run_global_models <- FALSE
   } else if (is.null(run_global_models)) {
     run_global_models <- TRUE
@@ -129,12 +133,24 @@ train_models <- function(run_info,
     dplyr::pull(Model_Name) %>%
     unique()
 
-  global_model_list <- c("cubist", "glmnet", "mars", "svm-poly", "svm-rbf", "xgboost")
+  global_model_list <- list_global_models()
+  fs_model_list <- list_multivariate_models()
 
   if (sum(model_workflow_list %in% global_model_list) == 0 & run_global_models) {
     run_global_models <- FALSE
     cli::cli_alert_info("Turning global models off since no multivariate models were chosen to run.")
     cli::cli_progress_update()
+  }
+
+  # get other time series info
+  if (box_cox || stationary) {
+    orig_combo_info_tbl <- read_file(run_info,
+      path = paste0(
+        "/prep_data/", hash_data(run_info$experiment_name), "-", hash_data(run_info$run_name),
+        "-orig_combo_info.", run_info$data_output
+      ),
+      return_type = "df"
+    )
   }
 
   # get list of tasks to run
@@ -203,12 +219,12 @@ train_models <- function(run_info,
     stringr::str_replace(hash_data("All-Data"), "All-Data")
 
   if (length(combo_diff) == 0 & length(prev_combo_list) > 0) {
-
     # check if input values have changed
     current_log_df <- tibble::tibble(
       run_global_models = run_global_models,
       run_local_models = run_local_models,
       global_model_recipes = global_model_recipes,
+      feature_selection = feature_selection,
       seed = seed
     ) %>%
       data.frame()
@@ -252,11 +268,30 @@ train_models <- function(run_info,
     .noexport = NULL
   ) %op%
     {
+      # get time series
       combo_hash <- x
 
       model_recipe_tbl <- get_recipe_data(run_info,
         combo = x
       )
+
+      if (combo_hash == "All-Data") {
+        model_workflow_tbl <- model_workflow_tbl %>%
+          dplyr::filter(
+            Model_Name %in% list_global_models(),
+            Model_Recipe %in% global_model_recipes
+          )
+      }
+
+      # get other time series info
+      if (box_cox || stationary) {
+        if (combo_hash == "All-Data") {
+          filtered_combo_info_tbl <- orig_combo_info_tbl
+        } else {
+          filtered_combo_info_tbl <- orig_combo_info_tbl %>%
+            dplyr::filter(Combo_Hash == combo_hash)
+        }
+      }
 
       if (inner_parallel) {
         # ensure variables get exported
@@ -267,8 +302,78 @@ train_models <- function(run_info,
         combo_variables <- combo_variables
         negative_fcst_adj <- negative_fcst_adj
         negative_forecast <- negative_forecast
+        stationary <- stationary
+        box_cox <- box_cox
+        undifference_forecast <- undifference_forecast
+        undifference_recipe <- undifference_recipe
+        list_global_models <- list_global_models
+        list_multivariate_models <- list_multivariate_models
       }
 
+      if (feature_selection) {
+        # ensure feature selection objects get exported
+        lofo_fn <- lofo_fn
+        target_corr_fn <- target_corr_fn
+        vip_rf_fn <- vip_rf_fn
+        vip_lm_fn <- vip_lm_fn
+        vip_cubist_fn <- vip_cubist_fn
+        boruta_fn <- boruta_fn
+        feature_selection <- feature_selection
+        fs_model_list <- fs_model_list
+      }
+
+      # run feature selection
+      if (feature_selection & sum(unique(model_workflow_tbl$Model_Name) %in% fs_model_list) > 0) {
+        fs_list <- list()
+
+        if ("R1" %in% unique(model_workflow_tbl$Model_Recipe)) {
+          R1_fs_list <- model_recipe_tbl %>%
+            dplyr::filter(Recipe == "R1") %>%
+            dplyr::select(Data) %>%
+            tidyr::unnest(Data) %>%
+            run_feature_selection(
+              run_info = run_info,
+              train_test_data = model_train_test_tbl,
+              parallel_processing = if (inner_parallel) {
+                "local_machine"
+              } else {
+                NULL
+              },
+              date_type = date_type,
+              fast = FALSE,
+              forecast_horizon = forecast_horizon,
+              external_regressors = external_regressors,
+              multistep_horizon = multistep_horizon
+            )
+
+          fs_list <- append(fs_list, list(R1 = R1_fs_list))
+        }
+
+        if ("R2" %in% unique(model_workflow_tbl$Model_Recipe)) {
+          R2_fs_list <- model_recipe_tbl %>%
+            dplyr::filter(Recipe == "R2") %>%
+            dplyr::select(Data) %>%
+            tidyr::unnest(Data) %>%
+            run_feature_selection(
+              run_info = run_info,
+              train_test_data = model_train_test_tbl,
+              parallel_processing = if (inner_parallel) {
+                "local_machine"
+              } else {
+                NULL
+              },
+              date_type = date_type,
+              fast = FALSE,
+              forecast_horizon = forecast_horizon,
+              external_regressors = external_regressors,
+              multistep_horizon = FALSE
+            )
+
+          fs_list <- append(fs_list, list(R2 = R2_fs_list))
+        }
+      }
+
+      # train each model
       par_info <- par_start(
         run_info = run_info,
         parallel_processing = if (inner_parallel) {
@@ -294,7 +399,6 @@ train_models <- function(run_info,
         .multicombine = TRUE,
         .noexport = NULL
       ) %do% {
-
         # get initial run info
         model <- model_run %>%
           dplyr::pull(Model_Name)
@@ -316,6 +420,52 @@ train_models <- function(run_info,
 
         workflow <- workflow$Model_Workflow[[1]]
 
+        if (nrow(prep_data) > 500 & model == "xgboost") {
+          # update xgboost model to use 'hist' tree method to speed up training
+          workflow <- workflows::update_model(workflow,
+                                              workflows::extract_spec_parsnip(workflow) %>%
+                                                parsnip::set_args(tree_method = "hist"))
+        }
+
+        if (combo_hash == "All-Data") {
+          # adjust column types to match original data
+          prep_data <- adjust_column_types(
+            prep_data,
+            workflows::extract_recipe(workflow, estimated = FALSE)
+          )
+        }
+
+        if (feature_selection & model %in% fs_model_list) {
+          # update model workflow to only use features from feature selection process
+          if (data_prep_recipe == "R1") {
+            final_features_list <- fs_list$R1
+          } else {
+            final_features_list <- fs_list$R2
+          }
+
+          if (multistep_horizon & data_prep_recipe == "R1" & model %in% list_multistep_models()) {
+            updated_model_spec <- workflow %>%
+              workflows::extract_spec_parsnip() %>%
+              update(selected_features = final_features_list)
+
+            empty_workflow_final <- workflow %>%
+              workflows::update_model(updated_model_spec)
+          } else {
+            final_features_list <- final_features_list[[paste0("model_lag_", forecast_horizon)]]
+
+            updated_recipe <- workflow %>%
+              workflows::extract_recipe(estimated = FALSE) %>%
+              recipes::remove_role(tidyselect::everything(), old_role = "predictor") %>%
+              recipes::update_role(tidyselect::any_of(unique(c(final_features_list, "Date"))), new_role = "predictor") %>%
+              base::suppressWarnings()
+
+            empty_workflow_final <- workflow %>%
+              workflows::update_recipe(updated_recipe)
+          }
+        } else {
+          empty_workflow_final <- workflow
+        }
+
         hyperparameters <- model_hyperparameter_tbl %>%
           dplyr::filter(
             Model == model,
@@ -324,19 +474,29 @@ train_models <- function(run_info,
           dplyr::select(Hyperparameter_Combo, Hyperparameters) %>%
           tidyr::unnest(Hyperparameters)
 
+        if (stationary & !(model %in% list_multivariate_models())) {
+          # undifference the data for a univariate model
+          prep_data <- prep_data %>%
+            undifference_recipe(
+              filtered_combo_info_tbl,
+              model_train_test_tbl %>% dplyr::slice(1) %>% dplyr::pull(Train_End)
+            )
+        }
+
         # tune hyperparameters
         set.seed(seed)
 
         tune_results <- tune::tune_grid(
-          object = workflow,
+          object = empty_workflow_final,
           resamples = create_splits(prep_data, model_train_test_tbl %>% dplyr::filter(Run_Type == "Validation")),
           grid = hyperparameters %>% dplyr::select(-Hyperparameter_Combo),
           control = tune::control_grid(
             allow_par = inner_parallel,
-            pkgs = inner_packages,
+            pkgs = c(inner_packages, "finnts"),
             parallel_over = "everything"
           )
         ) %>%
+          base::suppressMessages() %>%
           base::suppressWarnings()
 
         best_param <- tune::select_best(tune_results, metric = "rmse")
@@ -351,15 +511,17 @@ train_models <- function(run_info,
             base::suppressMessages()
         }
 
-        final_wflow <- tune::finalize_workflow(workflow, best_param)
+        finalized_workflow <- tune::finalize_workflow(empty_workflow_final, best_param)
+
         set.seed(seed)
-        wflow_fit <- generics::fit(final_wflow, prep_data %>% tidyr::drop_na(Target))
+        wflow_fit <- generics::fit(finalized_workflow, prep_data %>% tidyr::drop_na(Target)) %>%
+          base::suppressMessages()
 
         # refit on all train test splits
         set.seed(seed)
 
         refit_tbl <- tune::fit_resamples(
-          object = final_wflow,
+          object = finalized_workflow,
           resamples = create_splits(prep_data, model_train_test_tbl),
           metrics = NULL,
           control = tune::control_resamples(
@@ -368,18 +530,18 @@ train_models <- function(run_info,
             pkgs = inner_packages,
             parallel_over = "everything"
           )
-        )
+        ) %>%
+          tune::collect_predictions() %>%
+          base::suppressMessages() %>%
+          base::suppressWarnings()
 
-        final_fcst <- tune::collect_predictions(refit_tbl) %>%
+        # finalize forecast
+        final_fcst <- refit_tbl %>%
           dplyr::rename(
             Forecast = .pred,
             Train_Test_ID = id
           ) %>%
           dplyr::mutate(Train_Test_ID = as.numeric(Train_Test_ID)) %>%
-          dplyr::left_join(model_train_test_tbl %>%
-            dplyr::select(Run_Type, Train_Test_ID),
-          by = "Train_Test_ID"
-          ) %>%
           dplyr::left_join(
             prep_data %>%
               dplyr::mutate(.row = dplyr::row_number()) %>%
@@ -387,9 +549,85 @@ train_models <- function(run_info,
             by = ".row"
           ) %>%
           dplyr::mutate(Hyperparameter_ID = hyperparameter_id) %>%
-          dplyr::select(-.row, -.config) %>%
+          dplyr::select(-.row, -.config)
+
+        # check for future forecast
+        if (as.numeric(min(unique(final_fcst$Train_Test_ID))) != 1) {
+          stop("model is missing future forecast")
+        }
+
+        # undo differencing transformation
+        if (stationary & model %in% list_multivariate_models()) {
+          if (combo_hash == "All-Data") {
+            final_fcst <- final_fcst %>%
+              dplyr::group_by(Combo) %>%
+              dplyr::group_split() %>%
+              purrr::map(function(x) {
+                combo <- unique(x$Combo)
+
+                final_fcst_return <- x %>%
+                  undifference_forecast(
+                    prep_data %>% dplyr::filter(Combo == combo),
+                    filtered_combo_info_tbl %>% dplyr::filter(Combo == combo)
+                  )
+
+                return(final_fcst_return)
+              }) %>%
+              dplyr::bind_rows()
+          } else {
+            final_fcst <- final_fcst %>%
+              undifference_forecast(
+                prep_data,
+                filtered_combo_info_tbl
+              )
+          }
+        }
+
+        # undo box-cox transformation
+        if (box_cox) {
+          if (combo_hash == "All-Data") {
+            final_fcst <- final_fcst %>%
+              dplyr::group_by(Combo) %>%
+              dplyr::group_split() %>%
+              purrr::map(function(x) {
+                combo <- unique(x$Combo)
+
+                lambda <- filtered_combo_info_tbl %>%
+                  dplyr::filter(Combo == combo) %>%
+                  dplyr::select(Box_Cox_Lambda) %>%
+                  dplyr::pull(Box_Cox_Lambda)
+
+                if (!is.na(lambda)) {
+                  final_fcst_return <- x %>%
+                    dplyr::mutate(
+                      Forecast = timetk::box_cox_inv_vec(Forecast, lambda = lambda),
+                      Target = timetk::box_cox_inv_vec(Target, lambda = lambda)
+                    )
+                } else {
+                  final_fcst_return <- x
+                }
+
+                return(final_fcst_return)
+              }) %>%
+              dplyr::bind_rows()
+          } else {
+            lambda <- filtered_combo_info_tbl$Box_Cox_Lambda
+
+            if (!is.na(lambda)) {
+              final_fcst <- final_fcst %>%
+                dplyr::mutate(
+                  Forecast = timetk::box_cox_inv_vec(Forecast, lambda = lambda),
+                  Target = timetk::box_cox_inv_vec(Target, lambda = lambda)
+                )
+            }
+          }
+        }
+
+        # negative forecast adjustment
+        final_fcst <- final_fcst %>%
           negative_fcst_adj(negative_forecast)
 
+        # return the forecast
         combo_id <- ifelse(x == "All-Data", "All-Data", unique(final_fcst$Combo))
 
         final_return_tbl <- tibble::tibble(
@@ -407,7 +645,7 @@ train_models <- function(run_info,
       par_end(inner_cl)
 
       # ensure at least one model ran successfully
-      if (nrow(model_tbl) < 1) {
+      if (is.null(model_tbl)) {
         stop("All models failed to train")
       }
 
@@ -430,7 +668,7 @@ train_models <- function(run_info,
         tidyr::unnest(Forecast_Tbl) %>%
         dplyr::arrange(Train_Test_ID) %>%
         tidyr::unite(col = "Model_ID", c("Model_Name", "Model_Type", "Recipe_ID"), sep = "--", remove = FALSE) %>%
-        dplyr::group_by(Combo_ID, Model_ID, Train_Test_ID) %>%
+        dplyr::group_by(Combo, Model_ID, Train_Test_ID) %>%
         dplyr::mutate(Horizon = dplyr::row_number()) %>%
         dplyr::ungroup()
 
@@ -499,12 +737,13 @@ train_models <- function(run_info,
     length()
 
   if (successful_combos != total_combos) {
-    stop(paste0(
-      "Not all time series were completed within 'train_models', expected ",
-      total_combos, " time series but only ", successful_combos,
-      " time series were ran. ", "Please run 'train_models' again."
-    ),
-    call. = FALSE
+    stop(
+      paste0(
+        "Not all time series were completed within 'train_models', expected ",
+        total_combos, " time series but only ", successful_combos,
+        " time series were ran. ", "Please run 'train_models' again."
+      ),
+      call. = FALSE
     )
   }
 
@@ -514,6 +753,7 @@ train_models <- function(run_info,
       run_global_models = run_global_models,
       run_local_models = run_local_models,
       global_model_recipes = paste(unlist(global_model_recipes), collapse = "---"),
+      feature_selection = feature_selection,
       seed = seed,
       negative_forecast = negative_forecast,
       inner_parallel = inner_parallel
@@ -563,7 +803,6 @@ negative_fcst_adj <- function(data,
 #' @return tbl with train test splits
 #' @noRd
 create_splits <- function(data, train_test_splits) {
-
   # Create the rsplit object
   analysis_split <- function(data, train_indices, test_indices) {
     rsplit_object <- rsample::make_splits(
@@ -581,13 +820,14 @@ create_splits <- function(data, train_test_splits) {
     # Get the train and test end dates
     train_end <- train_test_splits$Train_End[i]
     test_end <- train_test_splits$Test_End[i]
-
-
+    train_test_id <- train_test_splits$Train_Test_ID[i]
 
     # Create the train and test indices
     train_indices <- which(data$Date <= train_end)
 
-    if ("Horizon" %in% colnames(data)) {
+    if ("Train_Test_ID" %in% colnames(data)) {
+      test_indices <- which(data$Train_Test_ID == train_test_id)
+    } else if ("Horizon" %in% colnames(data)) {
       # adjust for the horizon in R2 recipe data
       train_data <- data %>%
         dplyr::filter(
@@ -611,4 +851,189 @@ create_splits <- function(data, train_test_splits) {
   resamples <- rsample::manual_rset(splits = splits, ids = ids)
 
   return(resamples)
+}
+
+#' Function to undifference forecast data
+#'
+#' @param forecast_data forecast data
+#' @param recipe_data recipe data
+#' @param diff_tbl diff table
+#'
+#' @return tbl with undifferenced forecast
+#' @noRd
+undifference_forecast <- function(forecast_data,
+                                  recipe_data,
+                                  diff_tbl) {
+  # check if data needs to be undifferenced
+  diff1 <- diff_tbl$Diff_Value1
+  diff2 <- diff_tbl$Diff_Value2
+
+  if (is.na(diff1) & is.na(diff2)) {
+    return(forecast_data)
+  }
+
+  # return df
+  return_tbl <- tibble::tibble()
+
+  # train test id number
+  train_test_id <- unique(forecast_data$Train_Test_ID)
+
+  # non seasonal differencing
+  if (!is.na(diff1)) {
+    # loop through each back test split
+    for (id in train_test_id) {
+      # get specific train test split
+      fcst_temp_tbl <- forecast_data %>%
+        dplyr::filter(Train_Test_ID == id)
+
+      fcst_start_date <- min(unique(fcst_temp_tbl$Date))
+
+      # prep recipe data
+      if ("Horizon" %in% colnames(recipe_data)) {
+        filtered_recipe_data <- recipe_data %>%
+          dplyr::filter(
+            Date < fcst_start_date,
+            Horizon == min(unique(recipe_data$Horizon))
+          )
+      } else {
+        filtered_recipe_data <- recipe_data %>%
+          dplyr::filter(Date < fcst_start_date)
+      }
+
+      # adjust recipe data
+      filtered_recipe_data$Target[1] <- NA
+
+      if (!is.na(diff2)) {
+        filtered_recipe_data$Target[2] <- NA
+      }
+
+      # get number of differences and initial values
+      if (!is.na(diff1) & !is.na(diff2)) {
+        num_diffs <- 2
+        initial_value <- c(diff1, diff2)
+      } else {
+        num_diffs <- 1
+        initial_value <- diff1
+      }
+
+      # combine historical data with forecast, then undifference and return forecast
+      combined_data <- filtered_recipe_data %>%
+        dplyr::mutate(Forecast = Target) %>%
+        dplyr::select(Date, Target, Forecast) %>%
+        rbind(
+          fcst_temp_tbl %>%
+            dplyr::select(Date, Target, Forecast)
+        ) %>%
+        dplyr::arrange(Date)
+
+      if (id == 1) {
+        target_tbl <- combined_data %>%
+          dplyr::select(-Forecast) %>%
+          dplyr::filter(Date < fcst_start_date) %>%
+          dplyr::mutate(Target = timetk::diff_inv_vec(Target, difference = num_diffs, initial_values = initial_value))
+      } else {
+        target_tbl <- combined_data %>%
+          dplyr::select(-Forecast) %>%
+          dplyr::mutate(Target = timetk::diff_inv_vec(Target, difference = num_diffs, initial_values = initial_value))
+      }
+
+      forecast_tbl <- combined_data %>%
+        dplyr::select(-Target) %>%
+        dplyr::mutate(Forecast = timetk::diff_inv_vec(Forecast, difference = num_diffs, initial_values = initial_value))
+
+      final_forecast <- fcst_temp_tbl %>%
+        dplyr::select(-Target, -Forecast) %>%
+        dplyr::left_join(forecast_tbl, by = "Date") %>%
+        dplyr::left_join(target_tbl, by = "Date")
+
+      return_tbl <- return_tbl %>%
+        rbind(final_forecast)
+    }
+  }
+
+  return(return_tbl)
+}
+
+#' Function to undifference recipe data
+#'
+#' @param recipe_data recipe data
+#' @param diff_tbl diff table
+#' @param hist_end_date historical data end date
+#'
+#' @return tbl with undifferenced recipe
+#' @noRd
+undifference_recipe <- function(recipe_data,
+                                diff_tbl,
+                                hist_end_date) {
+  # check if data needs to be undifferenced
+  diff1 <- diff_tbl$Diff_Value1
+  diff2 <- diff_tbl$Diff_Value2
+
+  if (is.na(diff1) & is.na(diff2)) {
+    return(recipe_data)
+  }
+
+  # adjust recipe data
+  recipe_data$Target[1] <- NA
+
+  if (!is.na(diff2)) {
+    recipe_data$Target[2] <- NA
+  }
+
+  # get number of differences and initial values
+  if (!is.na(diff1) & !is.na(diff2)) {
+    num_diffs <- 2
+    initial_value <- c(diff1, diff2)
+  } else {
+    num_diffs <- 1
+    initial_value <- diff1
+  }
+
+  # undifference the data
+  undiff_recipe_data <- recipe_data %>%
+    dplyr::filter(Date <= hist_end_date) %>%
+    dplyr::mutate(Target = timetk::diff_inv_vec(Target, difference = num_diffs, initial_values = initial_value))
+
+  future_data <- recipe_data %>%
+    dplyr::filter(Date > hist_end_date)
+
+  final_recipe_data <- undiff_recipe_data %>%
+    rbind(future_data)
+
+  return(final_recipe_data)
+}
+
+#' Function to enforce correct column formatting
+#'
+#' @param data data
+#' @param recipe recipe
+#'
+#' @return tbl with correct column types
+#' @noRd
+adjust_column_types <- function(data, recipe) {
+  # Extract the required column types from the recipe
+  expected_types <- recipe$var_info %>%
+    dplyr::select(variable, type) %>%
+    dplyr::mutate(type = purrr::map_chr(type, ~ .x[[1]]))
+
+  # Identify and coerce mismatched columns
+  for (i in seq_len(nrow(expected_types))) {
+    col_name <- expected_types$variable[i]
+    expected_type <- expected_types$type[i]
+
+    # Check if column exists and type mismatch
+    if (col_name %in% names(data)) {
+      actual_type <- class(data[[col_name]])[1]
+
+      # Convert if types are different
+      if (expected_type == "string" && actual_type != "character") {
+        data[[col_name]] <- as.character(data[[col_name]])
+      } else if (expected_type %in% c("numeric", "double") && actual_type != "numeric") {
+        data[[col_name]] <- as.numeric(data[[col_name]])
+      } else if (expected_type == "date" && actual_type != "Date") {
+        data[[col_name]] <- as.Date(data[[col_name]])
+      }
+    }
+  }
+  return(data)
 }

@@ -3,6 +3,7 @@
 #' @param input_data initial historical data
 #' @param run_info run info
 #' @param combo_variables combo variables
+#' @param external_regressors external regressors
 #' @param forecast_approach whether it's a bottoms up or hierarchical forecast
 #' @param frequency_number frequency of time series
 #'
@@ -11,6 +12,7 @@
 prep_hierarchical_data <- function(input_data,
                                    run_info,
                                    combo_variables,
+                                   external_regressors,
                                    forecast_approach,
                                    frequency_number) {
   if (forecast_approach == "bottoms_up") {
@@ -42,40 +44,163 @@ prep_hierarchical_data <- function(input_data,
     dplyr::mutate_if(is.numeric, list(~ replace(., is.na(.), 0))) %>%
     base::suppressWarnings()
 
-  # create aggregations
-  Date <- bottom_level_tbl$Date
-
-  hierarchical_object <- bottom_level_tbl %>%
-    dplyr::select(-Date) %>%
-    stats::ts(frequency = frequency_number) %>%
-    get_hts(
-      hts_nodes,
-      forecast_approach
-    )
-
-  hts_nodes_final <- get_hts_nodes(
-    hierarchical_object,
-    forecast_approach
+  # create aggregations for target variable
+  hierarchical_tbl <- sum_hts_data(
+    bottom_level_tbl,
+    hts_nodes,
+    "Target",
+    forecast_approach,
+    frequency_number
   )
 
-  hierarchical_tbl <- hierarchical_object %>%
-    hts::allts() %>%
-    data.frame() %>%
-    tibble::add_column(
-      Date = Date,
-      .before = 1
-    ) %>%
-    tidyr::pivot_longer(!Date,
-      names_to = "Combo",
-      values_to = "Target"
-    ) %>%
-    dplyr::mutate(Combo = snakecase::to_any_case(Combo, case = "none"))
+  # create aggregations for external regressors
+  if (!is.null(external_regressors)) {
+    regressor_mapping <- external_regressor_mapping(
+      input_data_adj,
+      combo_variables,
+      external_regressors
+    )
+
+    regressor_agg <- foreach::foreach(
+      regressor_tbl = regressor_mapping %>%
+        dplyr::group_split(dplyr::row_number(), .keep = FALSE),
+      .combine = "rbind",
+      .errorhandling = "stop",
+      .verbose = FALSE,
+      .inorder = FALSE,
+      .multicombine = TRUE,
+      .noexport = NULL
+    ) %do% {
+      regressor_var <- regressor_tbl$Regressor
+      value_level <- regressor_tbl$Var
+
+      if (value_level == "Global") {
+        temp_tbl <- input_data_adj %>%
+          dplyr::select(Date, tidyselect::all_of(regressor_var)) %>%
+          dplyr::distinct()
+
+        hierarchical_tbl <- hierarchical_tbl %>%
+          dplyr::left_join(temp_tbl, by = c("Date"))
+      } else if (value_level != "All") {
+        # agg by lowest level
+        bottom_tbl <- input_data_adj %>%
+          tidyr::unite("Combo",
+            tidyselect::all_of(combo_variables),
+            sep = "_",
+            remove = F
+          ) %>%
+          dplyr::select(Date, Combo, tidyselect::all_of(regressor_var)) %>%
+          dplyr::mutate(Combo = snakecase::to_any_case(Combo, case = "none"))
+
+        bottom_combos <- unique(bottom_tbl$Combo)
+
+        hier_temp_tbl_1 <- hierarchical_tbl %>%
+          dplyr::select(Combo, Date) %>%
+          dplyr::filter(Combo %in% bottom_combos) %>%
+          dplyr::left_join(bottom_tbl, by = c("Combo", "Date"))
+
+        # agg by specific combo variable level
+        value_level <- strsplit(value_level, split = "---")[[1]]
+
+        hier_temp_tbl_2 <- foreach::foreach(
+          value_level_iter = value_level,
+          .combine = "rbind",
+          .errorhandling = "stop",
+          .verbose = FALSE,
+          .inorder = FALSE,
+          .multicombine = TRUE,
+          .noexport = NULL
+        ) %do% {
+          temp_tbl <- input_data_adj %>%
+            tidyr::drop_na(tidyselect::all_of(regressor_var)) %>%
+            dplyr::select(Date, tidyselect::all_of(value_level_iter), tidyselect::all_of(regressor_var)) %>%
+            dplyr::distinct()
+
+          if (length(value_level) > 1) {
+            temp_tbl <- temp_tbl %>%
+              dplyr::group_by(dplyr::across(tidyselect::all_of(c("Date", value_level_iter)))) %>%
+              dplyr::summarise(Value = sum(.data[[regressor_var]], na.rm = TRUE)) %>%
+              dplyr::ungroup()
+
+            names(temp_tbl)[names(temp_tbl) == "Value"] <- regressor_var
+          }
+
+          colnames(temp_tbl) <- c("Date", "Combo", regressor_var)
+
+          temp_tbl$Combo <- paste0(value_level_iter, "_", temp_tbl$Combo)
+
+          temp_tbl <- temp_tbl %>%
+            dplyr::mutate(Combo = snakecase::to_any_case(Combo, case = "none"))
+
+          temp_combos <- unique(temp_tbl$Combo)
+
+          hier_temp_tbl <- hierarchical_tbl %>%
+            dplyr::select(Combo, Date) %>%
+            dplyr::filter(Combo %in% temp_combos) %>%
+            dplyr::distinct() %>%
+            dplyr::left_join(temp_tbl, by = c("Combo", "Date"))
+
+          return(hier_temp_tbl)
+        }
+
+        # agg by total
+        total_tbl <- input_data_adj %>%
+          tidyr::drop_na(tidyselect::all_of(regressor_var)) %>%
+          dplyr::select(Date, value_level[[1]], tidyselect::all_of(regressor_var)) %>%
+          dplyr::distinct() %>%
+          dplyr::group_by(Date) %>%
+          dplyr::rename("Agg" = tidyselect::all_of(regressor_var)) %>%
+          dplyr::summarise(Agg = sum(Agg, na.rm = TRUE))
+
+        colnames(total_tbl)[colnames(total_tbl) == "Agg"] <- regressor_var
+
+        hier_temp_tbl_3 <- hierarchical_tbl %>%
+          dplyr::select(Combo, Date) %>%
+          dplyr::filter(Combo %in% setdiff(unique(hierarchical_tbl$Combo), c(unique(hier_temp_tbl_2$Combo), bottom_combos))) %>%
+          dplyr::left_join(total_tbl, by = c("Date"))
+
+        # combine together
+        hierarchical_tbl <- hierarchical_tbl %>%
+          dplyr::left_join(
+            rbind(hier_temp_tbl_1, hier_temp_tbl_2, hier_temp_tbl_3),
+            by = c("Combo", "Date")
+          )
+      } else if (value_level == "All") {
+        bottom_level_temp_tbl <- input_data_adj %>%
+          dplyr::select(Combo, Date, tidyselect::all_of(regressor_var)) %>%
+          tidyr::pivot_wider(
+            names_from = Combo,
+            values_from = tidyselect::all_of(regressor_var)
+          ) %>%
+          dplyr::mutate_if(is.numeric, list(~ replace(., is.na(.), 0))) %>%
+          base::suppressWarnings()
+
+        temp_tbl <- sum_hts_data(
+          bottom_level_temp_tbl,
+          hts_nodes,
+          regressor_var,
+          forecast_approach,
+          frequency_number
+        )
+
+        hierarchical_tbl <- hierarchical_tbl %>%
+          dplyr::left_join(temp_tbl, by = c("Date", "Combo"))
+      }
+      return(regressor_tbl)
+    }
+  }
 
   # write hierarchy structure to disk
   hts_list <- list(
     original_combos = colnames(bottom_level_tbl %>% dplyr::select(-Date)),
     hts_combos = hierarchical_tbl %>% dplyr::pull(Combo) %>% unique(),
-    nodes = hts_nodes_final
+    nodes = sum_hts_data(bottom_level_tbl,
+      hts_nodes,
+      "Target",
+      forecast_approach,
+      frequency_number,
+      return_type = "nodes"
+    )
   )
 
   write_data(
@@ -99,7 +224,7 @@ prep_hierarchical_data <- function(input_data,
 
   return_data <- hierarchical_tbl %>%
     adjust_df(return_type = df_return_type) %>%
-    dplyr::select(Combo, Date, Target)
+    dplyr::select(Combo, Date, Target, tidyselect::any_of(external_regressors))
 
   return(return_data)
 }
@@ -276,7 +401,6 @@ reconcile_hierarchical_data <- function(run_info,
                                         forecast_approach,
                                         negative_forecast = FALSE,
                                         num_cores) {
-
   # get run splits
   model_train_test_tbl <- read_file(run_info,
     path = paste0(
@@ -297,6 +421,20 @@ reconcile_hierarchical_data <- function(run_info,
   original_combo_list <- hts_list$original_combos
   hts_combo_list <- hts_list$hts_combos
 
+  # check if data has been condensed
+  cond_path <- paste0(
+    run_info$path, "/forecasts/*", hash_data(run_info$experiment_name), "-",
+    hash_data(run_info$run_name), "*condensed", ".", run_info$data_output
+  )
+
+  condensed_files <- list_files(run_info$storage_object, fs::path(cond_path))
+
+  if (length(condensed_files) > 0) {
+    condensed <- TRUE
+  } else {
+    condensed <- FALSE
+  }
+
   # get unreconciled forecast data
   if (is.null(parallel_processing)) {
     return_type <- "df"
@@ -306,10 +444,17 @@ reconcile_hierarchical_data <- function(run_info,
     return_type <- "df"
   }
 
-  fcst_path <- paste0(
-    "/forecasts/*", hash_data(run_info$experiment_name), "-",
-    hash_data(run_info$run_name), "*models", ".", run_info$data_output
-  )
+  if (condensed) {
+    fcst_path <- paste0(
+      "/forecasts/*", hash_data(run_info$experiment_name), "-",
+      hash_data(run_info$run_name), "*condensed", ".", run_info$data_output
+    )
+  } else {
+    fcst_path <- paste0(
+      "/forecasts/*", hash_data(run_info$experiment_name), "-",
+      hash_data(run_info$run_name), "*models", ".", run_info$data_output
+    )
+  }
 
   unreconciled_tbl <- read_file(run_info,
     path = fcst_path,
@@ -360,71 +505,77 @@ reconcile_hierarchical_data <- function(run_info,
       {
         model <- x
 
-        if (model == "Best-Model") {
-          model_tbl <- unreconciled_tbl %>%
-            dplyr::filter(Best_Model == "Yes") %>%
-            dplyr::left_join(model_train_test_tbl %>% dplyr::select(Run_Type, Train_Test_ID),
-              by = "Train_Test_ID"
-            ) %>%
-            dplyr::filter(Run_Type %in% c("Future_Forecast", "Back_Test"))
-        } else {
-          model_tbl <- unreconciled_tbl %>%
-            dplyr::filter(Model_ID == model) %>%
-            dplyr::left_join(model_train_test_tbl %>% dplyr::select(Run_Type, Train_Test_ID),
-              by = "Train_Test_ID"
-            ) %>%
-            dplyr::filter(Run_Type %in% c("Future_Forecast", "Back_Test"))
-        }
-
-        if (length(unique(model_tbl$Combo)) != length(hts_combo_list)) {
-          # add snaive fcst to missing combos to get a full hierarchy of forecasts to reconcile
-          snaive_combo_list <- setdiff(hts_combo_list, unique(model_tbl$Combo))
-
-          snaive_tbl <- unreconciled_tbl %>%
-            dplyr::filter(Model_Name == "snaive") %>%
-            dplyr::left_join(model_train_test_tbl %>% dplyr::select(Run_Type, Train_Test_ID),
-              by = "Train_Test_ID"
-            ) %>%
-            dplyr::filter(
-              Run_Type %in% c("Future_Forecast", "Back_Test"),
-              Combo %in% snaive_combo_list
-            )
-
-          model_tbl <- model_tbl %>%
-            rbind(snaive_tbl)
-        }
-
-        forecast_tbl <- model_tbl %>%
-          dplyr::select(Date, Train_Test_ID, Combo, Forecast) %>%
-          tidyr::pivot_wider(names_from = Combo, values_from = Forecast)
-
-        forecast_tbl[is.na(forecast_tbl)] <- 0
-
-        date_tbl <- forecast_tbl %>%
-          dplyr::select(Date, Train_Test_ID)
-
-        ts <- forecast_tbl %>%
-          dplyr::select(-Date, -Train_Test_ID) %>%
-          dplyr::select(hts_combo_list) %>%
-          stats::ts()
-
-        residual_multiplier <- 10 # shrink extra large residuals to prevent recon issues
-
-        residuals_tbl <- model_tbl %>%
-          dplyr::filter(Run_Type == "Back_Test") %>%
-          dplyr::mutate(
-            Forecast_Adj = ifelse((abs(Target) + 1) * residual_multiplier < abs(Forecast), (Target + 1) * residual_multiplier, Forecast), # prevent hts recon issues
-            Residual = Target - Forecast_Adj
-          ) %>%
-          dplyr::select(Combo, Date, Train_Test_ID, Residual) %>%
-          tidyr::pivot_wider(names_from = Combo, values_from = Residual) %>%
-          dplyr::select(-Date, -Train_Test_ID) %>%
-          dplyr::select(hts_combo_list) %>%
-          as.matrix()
+        ts_combined <- NULL
 
         tryCatch(
           {
-            ts_combined <- NULL
+            if (model == "Best-Model") {
+              model_tbl <- unreconciled_tbl %>%
+                dplyr::filter(Best_Model == "Yes") %>%
+                dplyr::left_join(model_train_test_tbl %>% dplyr::select(Run_Type, Train_Test_ID),
+                  by = "Train_Test_ID"
+                ) %>%
+                dplyr::filter(Run_Type %in% c("Future_Forecast", "Back_Test"))
+            } else {
+              model_tbl <- unreconciled_tbl %>%
+                dplyr::filter(Model_ID == model) %>%
+                dplyr::left_join(model_train_test_tbl %>% dplyr::select(Run_Type, Train_Test_ID),
+                  by = "Train_Test_ID"
+                ) %>%
+                dplyr::filter(Run_Type %in% c("Future_Forecast", "Back_Test"))
+            }
+
+            if (length(unique(model_tbl$Combo)) != length(hts_combo_list)) {
+              # add snaive fcst to missing combos to get a full hierarchy of forecasts to reconcile
+              snaive_combo_list <- setdiff(hts_combo_list, unique(model_tbl$Combo))
+
+              snaive_tbl <- unreconciled_tbl %>%
+                dplyr::filter(Model_Name == "snaive") %>%
+                dplyr::left_join(model_train_test_tbl %>% dplyr::select(Run_Type, Train_Test_ID),
+                  by = "Train_Test_ID"
+                ) %>%
+                dplyr::filter(
+                  Run_Type %in% c("Future_Forecast", "Back_Test"),
+                  Combo %in% snaive_combo_list
+                )
+
+              model_tbl <- model_tbl %>%
+                rbind(snaive_tbl)
+            }
+
+            forecast_tbl <- model_tbl %>%
+              dplyr::select(Date, Train_Test_ID, Combo, Forecast) %>%
+              dplyr::rowwise() %>%
+              dplyr::mutate(Forecast = ifelse(Forecast > 100000000000000, 100000000000000, Forecast)) %>%
+              dplyr::ungroup() %>%
+              tidyr::pivot_wider(names_from = Combo, values_from = Forecast)
+
+            forecast_tbl[is.na(forecast_tbl)] <- 0
+
+            date_tbl <- forecast_tbl %>%
+              dplyr::select(Date, Train_Test_ID)
+
+            ts <- forecast_tbl %>%
+              dplyr::select(-Date, -Train_Test_ID) %>%
+              dplyr::select(tidyselect::all_of(hts_combo_list)) %>%
+              stats::ts()
+
+            residual_multiplier <- 10 # shrink extra large residuals to prevent recon issues
+
+            residuals_tbl <- model_tbl %>%
+              dplyr::filter(Run_Type == "Back_Test") %>%
+              dplyr::mutate(
+                Forecast_Adj = ifelse((abs(Target) + 1) * residual_multiplier < abs(Forecast), (Target + 1) * residual_multiplier, Forecast), # prevent hts recon issues
+                Residual = Target - Forecast_Adj
+              ) %>%
+              dplyr::rowwise() %>%
+              dplyr::mutate(Residual = ifelse(Residual == 0, 0.0001, Residual)) %>%
+              dplyr::ungroup() %>%
+              dplyr::select(Combo, Date, Train_Test_ID, Residual) %>%
+              tidyr::pivot_wider(names_from = Combo, values_from = Residual) %>%
+              dplyr::select(-Date, -Train_Test_ID) %>%
+              dplyr::select(tidyselect::all_of(hts_combo_list)) %>%
+              as.matrix()
 
             if (forecast_approach == "standard_hierarchy") {
               ts_combined <- data.frame(hts::combinef(ts,
@@ -453,10 +604,12 @@ reconcile_hierarchical_data <- function(run_info,
           }
         )
 
+        # return if there was an error in the recon process for non best-model
         if (is.null(ts_combined)) {
           return(tibble::tibble())
         }
 
+        # final transformations before writing to disk
         reconciled_tbl <- ts_combined %>%
           tibble::add_column(
             Train_Test_ID = date_tbl$Train_Test_ID,
@@ -536,110 +689,108 @@ reconcile_hierarchical_data <- function(run_info,
       {
         model <- x
 
-        hist_tbl <- read_file(run_info,
-          path = paste0("/prep_data/", hash_data(run_info$experiment_name), "-", hash_data(run_info$run_name), "-hts_data.", run_info$data_output)
-        ) %>%
-          dplyr::select(Combo, Date, Target)
-
-        fcst_path <- paste0(
-          "/forecasts/*", hash_data(run_info$experiment_name), "-",
-          hash_data(run_info$run_name), "*models", ".", run_info$data_output
-        )
-
-        schema <- arrow::schema(
-          arrow::field("Combo_ID", arrow::string()),
-          arrow::field("Model_ID", arrow::string()),
-          arrow::field("Model_Name", arrow::string()),
-          arrow::field("Model_Type", arrow::string()),
-          arrow::field("Recipe_ID", arrow::string()),
-          arrow::field("Train_Test_ID", arrow::float64()),
-          arrow::field("Hyperparameter_ID", arrow::float64()),
-          arrow::field("Best_Model", arrow::string()),
-          arrow::field("Combo", arrow::string()),
-          arrow::field("Horizon", arrow::float64()),
-          arrow::field("Date", arrow::date32()),
-          arrow::field("Target", arrow::float64()),
-          arrow::field("Forecast", arrow::float64()),
-          arrow::field("lo_95", arrow::float64()),
-          arrow::field("lo_80", arrow::float64()),
-          arrow::field("hi_80", arrow::float64()),
-          arrow::field("hi_95", arrow::float64())
-        )
-
-        unreconciled_tbl <- read_file(run_info,
-          path = fcst_path,
-          return_type = "arrow",
-          schema = schema
-        )
-
-        if (model == "Best-Model") {
-          model_tbl <- unreconciled_tbl %>%
-            dplyr::filter(Best_Model == "Yes") %>%
-            dplyr::collect() %>%
-            dplyr::left_join(model_train_test_tbl %>% dplyr::select(Run_Type, Train_Test_ID),
-              by = "Train_Test_ID"
-            ) %>%
-            dplyr::filter(Run_Type %in% c("Future_Forecast", "Back_Test"))
-        } else {
-          model_tbl <- unreconciled_tbl %>%
-            dplyr::filter(Model_ID == model) %>%
-            dplyr::collect() %>%
-            dplyr::left_join(model_train_test_tbl %>% dplyr::select(Run_Type, Train_Test_ID),
-              by = "Train_Test_ID"
-            ) %>%
-            dplyr::filter(Run_Type %in% c("Future_Forecast", "Back_Test"))
-        }
-
-        if (length(unique(model_tbl$Combo)) != length(hts_combo_list)) {
-          # add snaive fcst to missing combos to get a full hierarchy of forecasts to reconcile
-          snaive_combo_list <- setdiff(hts_combo_list, unique(model_tbl$Combo))
-
-          snaive_tbl <- unreconciled_tbl %>%
-            dplyr::filter(Model_Name == "snaive") %>%
-            dplyr::collect() %>%
-            dplyr::left_join(model_train_test_tbl %>% dplyr::select(Run_Type, Train_Test_ID),
-              by = "Train_Test_ID"
-            ) %>%
-            dplyr::filter(
-              Run_Type %in% c("Future_Forecast", "Back_Test"),
-              Combo %in% snaive_combo_list
-            )
-
-          model_tbl <- model_tbl %>%
-            rbind(snaive_tbl)
-        }
-
-        forecast_tbl <- model_tbl %>%
-          dplyr::select(Date, Train_Test_ID, Combo, Forecast) %>%
-          tidyr::pivot_wider(names_from = Combo, values_from = Forecast)
-
-        forecast_tbl[is.na(forecast_tbl)] <- 0
-
-        date_tbl <- forecast_tbl %>%
-          dplyr::select(Date, Train_Test_ID)
-
-        ts <- forecast_tbl %>%
-          tibble::as_tibble() %>%
-          dplyr::select(tidyselect::all_of(hts_combo_list)) %>%
-          stats::ts()
-
-        residual_multiplier <- 10 # shrink extra large residuals to prevent recon issues
-
-        residuals_tbl <- model_tbl %>%
-          dplyr::filter(Run_Type == "Back_Test") %>%
-          dplyr::mutate(
-            Forecast_Adj = ifelse((abs(Target) + 1) * residual_multiplier < abs(Forecast), (Target + 1) * residual_multiplier, Forecast), # prevent hts recon issues
-            Residual = Target - Forecast_Adj
-          ) %>%
-          dplyr::select(Combo, Date, Train_Test_ID, Residual) %>%
-          tidyr::pivot_wider(names_from = Combo, values_from = Residual) %>%
-          tibble::as_tibble() %>%
-          dplyr::select(tidyselect::all_of(hts_combo_list)) %>%
-          as.matrix()
+        ts_combined <- NULL
 
         tryCatch(
           {
-            ts_combined <- NULL
+            hist_tbl <- read_file(run_info,
+              path = paste0("/prep_data/", hash_data(run_info$experiment_name), "-", hash_data(run_info$run_name), "-hts_data.", run_info$data_output)
+            ) %>%
+              dplyr::select(Combo, Date, Target)
+
+            schema <- arrow::schema(
+              arrow::field("Combo_ID", arrow::string()),
+              arrow::field("Model_ID", arrow::string()),
+              arrow::field("Model_Name", arrow::string()),
+              arrow::field("Model_Type", arrow::string()),
+              arrow::field("Recipe_ID", arrow::string()),
+              arrow::field("Train_Test_ID", arrow::float64()),
+              arrow::field("Hyperparameter_ID", arrow::float64()),
+              arrow::field("Best_Model", arrow::string()),
+              arrow::field("Combo", arrow::string()),
+              arrow::field("Horizon", arrow::float64()),
+              arrow::field("Date", arrow::date32()),
+              arrow::field("Target", arrow::float64()),
+              arrow::field("Forecast", arrow::float64()),
+              arrow::field("lo_95", arrow::float64()),
+              arrow::field("lo_80", arrow::float64()),
+              arrow::field("hi_80", arrow::float64()),
+              arrow::field("hi_95", arrow::float64())
+            )
+
+            unreconciled_tbl <- read_file(run_info,
+              path = fcst_path,
+              return_type = "arrow",
+              schema = schema
+            )
+
+            if (model == "Best-Model") {
+              model_tbl <- unreconciled_tbl %>%
+                dplyr::filter(Best_Model == "Yes") %>%
+                dplyr::collect() %>%
+                dplyr::left_join(model_train_test_tbl %>% dplyr::select(Run_Type, Train_Test_ID),
+                  by = "Train_Test_ID"
+                ) %>%
+                dplyr::filter(Run_Type %in% c("Future_Forecast", "Back_Test"))
+            } else {
+              model_tbl <- unreconciled_tbl %>%
+                dplyr::filter(Model_ID == model) %>%
+                dplyr::collect() %>%
+                dplyr::left_join(model_train_test_tbl %>% dplyr::select(Run_Type, Train_Test_ID),
+                  by = "Train_Test_ID"
+                ) %>%
+                dplyr::filter(Run_Type %in% c("Future_Forecast", "Back_Test"))
+            }
+
+            if (length(unique(model_tbl$Combo)) != length(hts_combo_list)) {
+              # add snaive fcst to missing combos to get a full hierarchy of forecasts to reconcile
+              snaive_combo_list <- setdiff(hts_combo_list, unique(model_tbl$Combo))
+
+              snaive_tbl <- unreconciled_tbl %>%
+                dplyr::filter(Model_Name == "snaive") %>%
+                dplyr::collect() %>%
+                dplyr::left_join(model_train_test_tbl %>% dplyr::select(Run_Type, Train_Test_ID),
+                  by = "Train_Test_ID"
+                ) %>%
+                dplyr::filter(
+                  Run_Type %in% c("Future_Forecast", "Back_Test"),
+                  Combo %in% snaive_combo_list
+                )
+
+              model_tbl <- model_tbl %>%
+                rbind(snaive_tbl)
+            }
+
+            forecast_tbl <- model_tbl %>%
+              dplyr::select(Date, Train_Test_ID, Combo, Forecast) %>%
+              tidyr::pivot_wider(names_from = Combo, values_from = Forecast)
+
+            forecast_tbl[is.na(forecast_tbl)] <- 0
+
+            date_tbl <- forecast_tbl %>%
+              dplyr::select(Date, Train_Test_ID)
+
+            ts <- forecast_tbl %>%
+              tibble::as_tibble() %>%
+              dplyr::select(tidyselect::all_of(hts_combo_list)) %>%
+              stats::ts()
+
+            residual_multiplier <- 10 # shrink extra large residuals to prevent recon issues
+
+            residuals_tbl <- model_tbl %>%
+              dplyr::filter(Run_Type == "Back_Test") %>%
+              dplyr::mutate(
+                Forecast_Adj = ifelse((abs(Target) + 1) * residual_multiplier < abs(Forecast), (Target + 1) * residual_multiplier, Forecast), # prevent hts recon issues
+                Residual = Target - Forecast_Adj
+              ) %>%
+              dplyr::rowwise() %>%
+              dplyr::mutate(Residual = ifelse(Residual == 0, 0.0001, Residual)) %>%
+              dplyr::ungroup() %>%
+              dplyr::select(Combo, Date, Train_Test_ID, Residual) %>%
+              tidyr::pivot_wider(names_from = Combo, values_from = Residual) %>%
+              tibble::as_tibble() %>%
+              dplyr::select(tidyselect::all_of(hts_combo_list)) %>%
+              as.matrix()
 
             if (forecast_approach == "standard_hierarchy") {
               ts_combined <- data.frame(hts::combinef(ts,
@@ -668,10 +819,12 @@ reconcile_hierarchical_data <- function(run_info,
           }
         )
 
+        # return if there was an error in reconciling a non best-model
         if (is.null(ts_combined)) {
           return(tibble::tibble())
         }
 
+        # final transformations before writing to disk
         reconciled_tbl <- ts_combined %>%
           tibble::add_column(
             Train_Test_ID = date_tbl$Train_Test_ID,
@@ -723,4 +876,160 @@ reconcile_hierarchical_data <- function(run_info,
     # clean up any parallel run process
     par_end(cl)
   }
+}
+
+#' Determine how external regressors should be aggregated
+#'
+#' @param data data
+#' @param combo_variables combo variables
+#' @param external_regressors external regressors
+#'
+#' @return data frame of regressor mappings
+#' @noRd
+external_regressor_mapping <- function(data,
+                                       combo_variables,
+                                       external_regressors) {
+  # create var combinations list
+  var_combinations <- tibble::tibble()
+
+  for (number in 2:min(length(combo_variables), 10)) {
+    temp <- data.frame(gtools::combinations(v = combo_variables, n = length(combo_variables), r = number))
+
+    temp <- temp %>%
+      tidyr::unite(Var_Combo, tidyselect::all_of(colnames(temp)), sep = "---") %>%
+      dplyr::select(Var_Combo) %>%
+      tibble::tibble()
+
+    var_combinations <- rbind(var_combinations, temp)
+  }
+
+  iter_list <- var_combinations %>%
+    dplyr::pull(Var_Combo) %>%
+    c(combo_variables)
+
+  # get final mapping of regressor to combo var level
+  regressor_mapping_tbl <- foreach::foreach(
+    regressor = external_regressors,
+    .combine = "rbind",
+    .errorhandling = "stop",
+    .verbose = FALSE,
+    .inorder = FALSE,
+    .multicombine = TRUE,
+    .noexport = NULL
+  ) %do% {
+    # get unique values of regressor per combo variable iteration
+    var_unique_tbl <- foreach::foreach(
+      var = iter_list,
+      .combine = "rbind",
+      .errorhandling = "stop",
+      .verbose = FALSE,
+      .inorder = FALSE,
+      .multicombine = TRUE,
+      .noexport = NULL
+    ) %do% {
+      var_list <- strsplit(var, split = "---")[[1]]
+
+      if (length(var_list) == length(combo_variables)) {
+        var <- "All"
+      }
+
+      temp_unique <- data %>%
+        tidyr::unite(Unique, tidyselect::all_of(c(var_list, "Date", regressor)), sep = "_") %>%
+        dplyr::pull(Unique) %>%
+        unique() %>%
+        length()
+
+      return(data.frame(Var = var, Unique = temp_unique))
+    }
+
+    # determine regressor mappings
+    if (length(unique(var_unique_tbl$Unique)) > 1) {
+      all_unique <- var_unique_tbl %>%
+        dplyr::filter(Var == "All") %>%
+        dplyr::pull(Unique)
+
+      regressor_test <- var_unique_tbl %>%
+        dplyr::filter(Unique < all_unique) %>%
+        dplyr::pull(Var)
+
+      if (length(unique(data$Date)) == data %>%
+        dplyr::select(Date, tidyselect::all_of(regressor)) %>%
+        dplyr::distinct() %>%
+        nrow()) {
+        regressor_test <- "Global"
+      } else if (length(regressor_test) > 1) {
+        combo_unique <- var_unique_tbl %>%
+          dplyr::filter(Var %in% combo_variables)
+
+        min_val <- min(unique(combo_unique$Unique))
+
+        regressor_test <- combo_unique %>%
+          dplyr::filter(Unique == min_val) %>%
+          dplyr::pull(Var)
+      }
+
+      if (length(regressor_test) > 1) {
+        regressor_test <- paste0(regressor_test, collapse = "---")
+      }
+
+      return(data.frame(Regressor = regressor, Var = regressor_test))
+    } else {
+      return(data.frame(Regressor = regressor, Var = "All"))
+    }
+  }
+
+  return(regressor_mapping_tbl)
+}
+
+#' Create hierarchical aggregations
+#'
+#' @param bottom_level_tbl bottom level table
+#' @param hts_nodes hts nodes
+#' @param sum_var column to get aggregated
+#' @param forecast_approach forecast approach
+#' @param frequency_number frequency number
+#' @param return_type return type
+#'
+#' @return data frame of hierarchical aggregations
+#' @noRd
+sum_hts_data <- function(bottom_level_tbl,
+                         hts_nodes,
+                         sum_var,
+                         forecast_approach,
+                         frequency_number,
+                         return_type = "data") {
+  # create aggregations for target variable
+  Date <- bottom_level_tbl$Date
+
+  hierarchical_object <- bottom_level_tbl %>%
+    dplyr::select(-Date) %>%
+    stats::ts(frequency = frequency_number) %>%
+    get_hts(
+      hts_nodes,
+      forecast_approach
+    )
+
+  hts_nodes_final <- get_hts_nodes(
+    hierarchical_object,
+    forecast_approach
+  )
+
+  if (return_type == "nodes") {
+    return(hts_nodes_final)
+  }
+
+  hierarchical_tbl <- hierarchical_object %>%
+    hts::allts() %>%
+    data.frame() %>%
+    tibble::add_column(
+      Date = Date,
+      .before = 1
+    ) %>%
+    tidyr::pivot_longer(!Date,
+      names_to = "Combo",
+      values_to = sum_var
+    ) %>%
+    dplyr::mutate(Combo = snakecase::to_any_case(Combo, case = "none"))
+
+  return(hierarchical_tbl)
 }
